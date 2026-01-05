@@ -664,6 +664,7 @@ CONTAINS
       REAL(wp), DIMENSION(nn_nfsd,nn_nfsd) ::   zBfrac               ! fracture redistribution function B(s,r)dr
       REAL(wp), DIMENSION(nn_nfsd)         ::   zQfrac               ! fracture probability function (s-1)
       REAL(wp), DIMENSION(nn_nfsd)         ::   za_ifsd_tend         ! tendency of FSD due to wave fracture
+      REAL(wp)                             ::   zh_i                 ! mean ice thickness
       REAL(wp)                             ::   zfsd_res             ! correction term for area conservation
       REAL(wp)                             ::   zdt_sub              ! adaptive time step (s)
       REAL(wp)                             ::   ztelapsed            ! to track time elapsed during adaptive time stepping (s)
@@ -707,8 +708,10 @@ CONTAINS
             !     For now, there is only one scheme (Horvat and Tziperman, 2015)
             !     But do not do the calculation if the local wave spectrum is too weak:
             !
+            zh_i = vt_i(ji,jj) / at_i(ji,jj)   ! mean ice thickness
+            !
             IF( MAXVAL( wspec(ji,jj,:) ) > epsi06 ) THEN
-               CALL wav_frac_ht15( wspec(ji,jj,:), vt_i(ji,jj) / at_i(ji,jj), zQfrac(:), zBfrac(:,:) )
+               CALL wav_frac_ht15( wspec(ji,jj,:), zh_i, zQfrac(:), zBfrac(:,:) )
             ELSE
                zQfrac(:)   = 0._wp
                zBfrac(:,:) = 0._wp
@@ -903,7 +906,6 @@ CONTAINS
       REAL(wp)                             ::   zdx, zdxlo, zdxhi       ! distances between x1d points in finite difference computation (m)
       REAL(wp)                             ::   zstrain                 ! strain experienced by sea ice due to wave field
       REAL(wp), DIMENSION(nn_ice_wav_nx1d) ::   zxfrac                  ! distances to points along x1d at which ice fractures
-      REAL(wp), DIMENSION(nn_ice_wav_nx1d) ::   zdxfrac                 ! distances between fracture points along x1d (m)
       REAL(wp)                             ::   zfrac_rad               ! floe radius of a piece of fractured ice (m)
       REAL(wp), DIMENSION(nn_nfsd)         ::   zWfrac                  ! fracture distribution (multiplied by dr; dimensionless)
       !
@@ -917,7 +919,6 @@ CONTAINS
       llmax(:)    = .FALSE.
       ixfrac      = 1
       zxfrac (:)  = 0._wp
-      zdxfrac(:)  = 0._wp
       zWfrac (:)  = 0._wp
       pQfrac(:)   = 0._wp
       pBfrac(:,:) = 0._wp
@@ -935,8 +936,8 @@ CONTAINS
       ! a 'moving window' of (2*nn_ice_wav_rmin + 1) points in the 1D subdomain x1d:
       !
       DO jx = 1 + nn_ice_wav_rmin, nn_ice_wav_nx1d - nn_ice_wav_rmin
-         llmax(jx) = ( MAXLOC( zssh(jx-nn_ice_wav_rmin:jx+nn_ice_wav_rmin), DIM=1 ) == nn_ice_wav_rmin )
-         llmin(jx) = ( MINLOC( zssh(jx-nn_ice_wav_rmin:jx+nn_ice_wav_rmin), DIM=1 ) == nn_ice_wav_rmin )
+         llmax(jx) = ( MAXLOC( zssh(jx-nn_ice_wav_rmin:jx+nn_ice_wav_rmin), DIM=1 ) == (nn_ice_wav_rmin + 1) )
+         llmin(jx) = ( MINLOC( zssh(jx-nn_ice_wav_rmin:jx+nn_ice_wav_rmin), DIM=1 ) == (nn_ice_wav_rmin + 1) )
          llext(jx) = (llmin(jx) .OR. llmax(jx))
       ENDDO
 
@@ -1030,7 +1031,7 @@ CONTAINS
       !
       IF( ixfrac >= 3 ) THEN
          !
-         DO jx = 2, ixfrac
+         DO jx = 2, ixfrac - 1
             !
             zfrac_rad = .5_wp * (zxfrac(jx) - zxfrac(jx-1))   ! factor of 0.5 ==> radius of fractured ice
             !
@@ -1053,33 +1054,36 @@ CONTAINS
             !
          ENDDO
 
-         ! Scale fracture histogram with floe size of each category and normalise
+         ! Scale fracture histogram with floe size of each category
          ! (noting W only appears multiplied by r in equations for Q and B):
          DO jf = 1, nn_nfsd
             zWfrac(jf) = floe_rc(jf) * zWfrac(jf)
          ENDDO
-         !
-         IF( SUM(zWfrac(:)) > 0._wp ) zWfrac(:) = zWfrac(:) / SUM(zWfrac(:))
-         !
-      ENDIF
 
-      ! Calculate the probability (pQfrac) and redistribution (pBfrac) functions
-      ! from the fracture distribution [zWfrac, which corresponds to rW(r)dr]:
-      !
-      DO jf = 2, nn_nfsd
-         pBfrac(jf,1:jf-1) = zWfrac(1:jf-1)   ! B(s,r)dr = rW(r)dr for r < s, normalised below
-      ENDDO
-      !
-      DO jf = 1, nn_nfsd
+         ! Calculate the probability (pQfrac) and redistribution (pBfrac) functions
+         ! from the fracture distribution [zWfrac, which corresponds to rW(r)dr]:
          !
-         pQfrac(jf) = SUM(zWfrac(1:jf-1))     ! Q(r) = int[ r'W(r')dr' ] for r' < r
+         DO jf = 2, nn_nfsd
+            ! B(s,r)dr = rW(r)dr / int[ r'W(r')dr' ] for r < s and r' < s
+            IF( SUM(zWfrac(1:jf-1)) > 0._wp ) THEN
+               pBfrac(jf,1:jf-1) = zWfrac(1:jf-1) / SUM(zWfrac(1:jf-1))
+            ENDIF
+         ENDDO
          !
-         ! Divide B(s,r)dr calculated above by the integral/sum over r
-         ! This normalises it so that int[ B(s,r)dr ] = 1:
-         !
-         IF( SUM(pBfrac(jf,:)) > 0._wp ) pBfrac(jf,:) = pBfrac(jf,:) / SUM(pBfrac(jf,:))
-         !
-      ENDDO
+         DO jf = 1, nn_nfsd
+            !
+            ! Q(r) = 1/(D/2) * int[ r'W(r')dr' ] for r' < r:
+            pQfrac(jf) = 2._wp * SUM(zWfrac(1:jf-1)) / (x1d(nn_ice_wav_nx1d) - x1d(1))
+            !
+            ! Divide B(s,r)dr calculated above by the integral/sum over r
+            ! This normalises it so that int[ B(s,r)dr ] = 1
+            ! (it should be anyway, but in case of discretisation errors this ensures it is so):
+            !
+            IF( SUM(pBfrac(jf,:)) > 0._wp ) pBfrac(jf,:) = pBfrac(jf,:) / SUM(pBfrac(jf,:))
+            !
+         ENDDO
+
+      ENDIF
 
       ! Control:
       IF( ln_timing )   CALL timing_stop('wav_frac_ht15')

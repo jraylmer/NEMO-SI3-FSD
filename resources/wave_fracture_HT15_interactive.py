@@ -239,15 +239,16 @@ def calc_break_locs(x1d_in, ssh_in, dx_in, rmin_in, hi_in, ec_in):
 
     # Extrema are defined as maxima or minima over a 'window' of size corresponding
     # to floes of diameter = 2*rmin.
-    jwindow = int(2. * rmin_in // dx_in) - 1
+    j_win_half = int(rmin_in // dx_in)  # half of the window size, corresponds to
+                                        # nn_ice_wav_rmin in icewav.F90 code
 
-    for jx in range(jwindow, nx-jwindow):
+    for jx in range(j_win_half, nx - j_win_half):
 
-        ixlo = jx - jwindow
-        ixhi = jx + jwindow + 1
+        ixlo = jx - j_win_half
+        ixhi = jx + j_win_half + 1
 
-        llmin[jx] = np.argmin(ssh_in[ixlo:ixhi]) == jwindow
-        llmax[jx] = np.argmax(ssh_in[ixlo:ixhi]) == jwindow
+        llmin[jx] = np.argmin(ssh_in[ixlo:ixhi]) == j_win_half
+        llmax[jx] = np.argmax(ssh_in[ixlo:ixhi]) == j_win_half
 
     llext = np.logical_or(llmax, llmin)
 
@@ -256,7 +257,7 @@ def calc_break_locs(x1d_in, ssh_in, dx_in, rmin_in, hi_in, ec_in):
     # points break:
     breaks_out = np.zeros(nx, dtype=bool)
 
-    for jx in range(jwindow, nx-jwindow):
+    for jx in range(j_win_half + 1, nx - j_win_half - 1):
         if llext[jx]:
 
             # Current point is an extremum. Locate the nearest extrema on

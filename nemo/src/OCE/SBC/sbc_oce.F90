@@ -61,18 +61,17 @@ MODULE sbc_oce
    INTEGER , PUBLIC ::   nn_cats_cpl    !: Number of sea ice categories over which the coupling is carried out
    !
    !                                   !!* namsbc_wave namelist *
-   LOGICAL , PUBLIC ::   ln_sdw         !: =T 3d stokes drift from wave model
-   LOGICAL , PUBLIC ::   ln_stcor       !: =T if Stokes-Coriolis and tracer advection terms are used
-   LOGICAL , PUBLIC ::   ln_cdgw        !: =T neutral drag coefficient from wave model
-   LOGICAL , PUBLIC ::   ln_tauoc       !: =T if normalized stress from wave is used
-   LOGICAL , PUBLIC ::   ln_wave_test   !: =T wave test case (constant Stokes drift)
-   LOGICAL , PUBLIC ::   ln_charn       !: =T Chranock coefficient from wave model
-   LOGICAL , PUBLIC ::   ln_taw         !: =T wind stress corrected by wave intake
-   LOGICAL , PUBLIC ::   ln_phioc       !: =T TKE surface BC from wave model
-   LOGICAL , PUBLIC ::   ln_bern_srfc   !: Bernoulli head, waves' inuced pressure
-   LOGICAL , PUBLIC ::   ln_breivikFV_2016 !: Breivik 2016 profile
-   LOGICAL , PUBLIC ::   ln_vortex_force !: vortex force activation
-   LOGICAL , PUBLIC ::   ln_stshear     !: Stoked Drift shear contribution in zdftke
+   LOGICAL , PUBLIC ::   ln_sdw          !: =T 3d stokes drift from wave model
+   LOGICAL , PUBLIC ::   ln_wave_test    !: =T wave test case (constant Stokes drift)
+   LOGICAL , PUBLIC ::   ln_breivikFV_2016 !: =T Breivik 2016 Stokes drift vertical profile
+   LOGICAL , PUBLIC ::   ln_vortex_force !: =T vortex force activation
+   LOGICAL , PUBLIC ::   ln_bern_srfc    !: =T Bernoulli head, waves'induced pressure
+   LOGICAL , PUBLIC ::   ln_cdgw         !: =T neutral drag coefficient from wave model
+   LOGICAL , PUBLIC ::   ln_charn        !: =T Charnock coefficient from wave model
+   LOGICAL , PUBLIC ::   ln_tauoc        !: =T if normalized stress from wave is used
+   LOGICAL , PUBLIC ::   ln_taw          !: =T wind stress corrected by wave intake
+   LOGICAL , PUBLIC ::   ln_phioc        !: =T TKE surface BC from wave model
+   LOGICAL , PUBLIC ::   ln_stshear      !: =T Stoked Drift shear contribution in zdftke
    !
    !                                                     !!* namsbc_wave namelist (continued) *
    LOGICAL , PUBLIC                 ::   ln_wave_spec     !: =T to read full wave spectrum

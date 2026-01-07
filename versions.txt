@@ -1,23 +1,21 @@
 Versions of the main code/software with which the modified source code in this
 repository have been compiled and tested with at the current commit are:
 
-XIOS2 revision: 2738
+XIOS2 revision: 2902
 
-NEMO main commit hash: d7ad8c2e
-git describe --tags: no-more-MLF-233-gd7ad8c2e
+NEMO main commit hash: 3b73a63c
+git describe --tags: debug-18-g3b73a63c
 
 
 Compiler and libraries on UoR RACC2
 -----------------------------------
 mpi/openmpi-x86_64
 netCDF 4.7.0
-netCDF-Fortran 4.5.2
-
-GNU Fortran (GCC) 8.5.0 20210514 (Red Hat 8.5.0-26)
+GNU Fortran (GCC) 8.5.0 20210514 (Red Hat 8.5.0-28)
 Copyright (C) 2018 Free Software Foundation, Inc.
 This is free software; see the source for copying conditions.  There is NO
 warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
-mpiexec (OpenRTE) 4.1.1
+mpirun (Open MPI) 4.1.1
 
 Report bugs to http://www.open-mpi.org/community/help/

@@ -370,8 +370,7 @@
    sn_rcv_icb    =   'none'                 ,    'no'    ,     ''      ,         ''           ,   ''
    sn_rcv_hsig   =   'none'                 ,    'no'    ,     ''      ,         ''           ,   ''
    sn_rcv_phioc  =   'none'                 ,    'no'    ,     ''      ,         ''           ,   ''
-   sn_rcv_sdrfx  =   'none'                 ,    'no'    ,     ''      ,         ''           ,   ''
-   sn_rcv_sdrfy  =   'none'                 ,    'no'    ,     ''      ,         ''           ,   ''
+   sn_rcv_sdrf   =   'none'                 ,    'no'    ,     ''      ,         ''           ,   ''
    sn_rcv_wper   =   'none'                 ,    'no'    ,     ''      ,         ''           ,   ''
    sn_rcv_wnum   =   'none'                 ,    'no'    ,     ''      ,         ''           ,   ''
    sn_rcv_wpf    =   'none'                 ,    'no'    ,     ''      ,         ''           ,   ''
@@ -380,8 +379,7 @@
    sn_rcv_charn  =   'none'                 ,    'no'    ,     ''      ,         ''           ,   ''
    sn_rcv_taw    =   'none'                 ,    'no'    ,     ''      ,         ''           ,   ''
    sn_rcv_bhd    =   'none'                 ,    'no'    ,     ''      ,         ''           ,   ''
-   sn_rcv_tusd   =   'none'                 ,    'no'    ,     ''      ,         ''           ,   ''
-   sn_rcv_tvsd   =   'none'                 ,    'no'    ,     ''      ,         ''           ,   ''
+   sn_rcv_tsd    =   'none'                 ,    'no'    ,     ''      ,         ''           ,   ''
    sn_rcv_wspec  =   'none'                 ,    'no'    ,     ''      ,         ''           ,   ''
 /
 !-----------------------------------------------------------------------
@@ -479,6 +477,7 @@
       rn_rnf_max  = 5.735e-4   !  max value of the runoff climatologie over global domain ( ln_rnf_depth_ini = .true )
       rn_dep_max  = 150.       !  depth over which runoffs is spread ( ln_rnf_depth_ini = .true )
       nn_rnf_depth_file = 0    !  create (=1) a runoff depth file or not (=0)
+   ln_icb_depth = .false.      !  read in depth information for icb runoff
 
    cn_dir       = './'      !  root directory for the runoff data location
    !___________!_________________________!___________________!___________!_____________!________!___________!__________________!__________!_______________!
@@ -490,6 +489,7 @@
    sn_t_rnf    = 'runoffs'               ,        24.        , 'rotemper',   .true.    , .true. , 'yearly'  , ''               , ''       , ''
    sn_i_rnf    = 'NOT USED'              ,        24.        , 'xxxxxxxx',   .true.    , .true. , 'yearly'  , ''               , ''       , ''
    sn_dep_rnf  = 'runoffs'               ,       -12.        , 'rodepth' ,   .false.   , .true. , 'yearly'  , ''               , ''       , ''
+   sn_dep_icb  = 'NOT USED'              ,        -1.        , 'icbthick',   .false.   , .true. , 'yearly'  , ''               , ''       , ''
 /
 !-----------------------------------------------------------------------
 &namsbc_apr    !   Atmospheric pressure used as ocean forcing           (ln_apr_dyn =T)
@@ -583,17 +583,15 @@
 &namsbc_wave   ! External fields from wave model                        (ln_wave=T)
 !-----------------------------------------------------------------------
    ln_sdw      = .false.       !  get the 2D Surf Stokes Drift & Compute the 3D stokes drift
-   ln_stcor    = .false.       !  add Stokes Coriolis and tracer advection terms
-   ln_cdgw     = .false.       !  Neutral drag coefficient read from wave model
-   ln_tauoc    = .false.       !  ocean stress is modified by wave induced stress
    ln_wave_test= .false.       !  Test case with constant wave fields
-!
-   ln_charn    = .false.       !  Charnock coefficient read from wave model (IFS only)
-   ln_taw      = .false.       !  ocean stress is modified by wave induced stress (coupled mode)
-   ln_phioc    = .false.       !  TKE flux from wave model
-   ln_bern_srfc= .false.       !  wave induced pressure. Bernoulli head J term
    ln_breivikFV_2016 = .false. !  breivik 2016 vertical stokes profile
    ln_vortex_force = .false.   !  Vortex Force term 
+   ln_bern_srfc= .false.       !  wave induced pressure. Bernoulli head J term
+   ln_cdgw     = .false.       !  Neutral drag coefficient read from wave model
+   ln_charn    = .false.       !  Charnock coefficient read from wave model (IFS only)
+   ln_tauoc    = .false.       !  ocean stress is modified by wave induced stress
+   ln_taw      = .false.       !  ocean stress is modified by wave induced stress (coupled mode)
+   ln_phioc    = .false.       !  TKE flux from wave model
    ln_stshear  = .false.       !  include stokes shear in EKE computation
 !
    ln_wave_spec = .false.      !  read wave energy spectrum (coupled or forced mode)
@@ -1095,7 +1093,6 @@
 !-----------------------------------------------------------------------
    ln_dynvor_ene = .false. !  energy    conserving scheme
    ln_dynvor_ens = .false. !  enstrophy conserving scheme
-   ln_dynvor_mix = .false. !  mixed scheme
    ln_dynvor_enT = .false. !  energy conserving scheme (T-point)
    ln_dynvor_een = .false. !  energy & enstrophy scheme
    !
@@ -1561,6 +1558,8 @@
    sn_cfctl%l_prttrc  = .FALSE.   !
    sn_cfctl%l_oasout  = .FALSE.   !
    sn_cfctl%l_obsstat = .FALSE.   !
+   sn_cfctl%l_lsb_sum = .FALSE.   ! Computation of a test value that is sensitive to changes in the two least-significant bytes of
+                                  ! any of the tested values (appended ot {run,tracer,obs}.stat records)
    sn_cfctl%procmin   = 0         ! Minimum area number for reporting [default:0]
    sn_cfctl%procmax   = 1000000   ! Maximum area number for reporting [default:1000000]
    sn_cfctl%procincr  = 1         ! Increment for optional subsetting of areas [default:1]

@@ -906,7 +906,7 @@ CONTAINS
       !!-----------------------------------------------------------------------
       !!                  ***  FUNCTION  iom_varid  ***
       !!
-      !! ** Purpose : get the id of a variable in a file (return 0 if not found)
+      !! ** Purpose : get the id of a variable in a file (return -1 if not found)
       !!-----------------------------------------------------------------------
       INTEGER              , INTENT(in   )           ::   kiomid   ! file Identifier
       CHARACTER(len=*)     , INTENT(in   )           ::   cdvar    ! name of the variable

@@ -155,40 +155,40 @@
   </grid>
 
   <grid id="grid_T_SFC">
-    <domain domain_ref="grid_T" />
+    <domain domain_ref="grid_T" name="grid_T" />
     <scalar>
       <extract_axis position="0" />
     </scalar>
   </grid>
   <grid id="grid_T_SFC_inner">
-    <domain domain_ref="grid_T_inner" />
+    <domain domain_ref="grid_T_inner" name="grid_T" />
     <scalar>
       <extract_axis position="0" />
     </scalar>
   </grid>
 
   <grid id="grid_T_vsum">
-    <domain domain_ref="grid_T"/>
+    <domain domain_ref="grid_T" name="grid_T" />
     <scalar>
       <reduce_axis operation="sum" />
     </scalar>
   </grid>
   <grid id="grid_T_vsum_inner">
-    <domain domain_ref="grid_T_inner" />
+    <domain domain_ref="grid_T_inner" name="grid_T" />
     <scalar>
       <reduce_axis operation="sum" />
     </scalar>
   </grid>
 
   <grid id="grid_U_vsum">
-    <domain domain_ref="grid_U"/>
+    <domain domain_ref="grid_U" name="grid_U" />
     <scalar>
       <reduce_axis operation="sum" />
     </scalar>
   </grid>
 
   <grid id="grid_V_vsum">
-    <domain domain_ref="grid_V"/>
+    <domain domain_ref="grid_V" name="grid_V"/>
     <scalar>
       <reduce_axis operation="sum" />
     </scalar>

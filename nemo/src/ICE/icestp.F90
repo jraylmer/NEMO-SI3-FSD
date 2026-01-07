@@ -43,7 +43,6 @@ MODULE icestp
    USE par_ice        ! SI3 parameters
    USE oce     , ONLY : uu, vv
    USE ice            ! sea-ice: variables
-   USE ice1D          ! sea-ice: thermodynamical 1D variables
    !
    USE phycst         ! Define parameters for the routines
    USE eosbn2         ! equation of state
@@ -330,12 +329,6 @@ CONTAINS
          IF(lrxios) CALL iom_context_finalize(      cr_icerst_cxt         )
       ENDIF
       !
-      !                                ! Allocate the 1D ice arrays
-      ierr = ice1D_alloc      ()       ! thermodynamics
-      !
-      CALL mpp_sum( 'icestp', ierr )
-      IF( ierr /= 0 )   CALL ctl_stop('STOP', 'ice_init : unable to allocate 1D ice arrays')
-      !
    END SUBROUTINE ice_init
 
 
@@ -507,8 +500,8 @@ CONTAINS
             qtr_ice_bot(ji,jj,jl) = 0._wp   ! part of solar radiation transmitted through the ice needed at least for outputs
             qml_ice    (ji,jj,jl) = 0._wp   ! surface melt heat flux
             ! Melt pond surface melt diagnostics (mv - more efficient: grouped into one water volume flux)
-            dh_i_sum_2d(ji,jj,jl) = 0._wp
-            dh_s_sum_2d(ji,jj,jl) = 0._wp
+            dh_i_sum_3d(ji,jj,jl) = 0._wp
+            dh_s_sum_3d(ji,jj,jl) = 0._wp
          END_2D
       ENDDO
 

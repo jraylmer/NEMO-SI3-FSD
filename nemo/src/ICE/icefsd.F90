@@ -14,7 +14,6 @@ MODULE icefsd
    !!   ice_fsd_init : namelist read
    !!----------------------------------------------------------------------
    USE par_ice          ! SI3 parameters
-   USE ice1D            ! sea-ice: thermodynamics variables
    USE ice              ! sea-ice: variables
 
    USE in_out_manager   ! I/O manager (needed for lwm and lwp logicals)
@@ -48,8 +47,6 @@ MODULE icefsd
    INTEGER , PUBLIC                              :: nf_newice    !: index of FSD cat. for new ice in absence of waves (m)
 
    REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:,:,:) ::   a_ifsd      !: FSD per ice thickness category
-   REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:,:)   ::   a_ifsd_2d   !: Reduced-dimension version of a_ifsd for thermodynamic routines
-   REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:)     ::   a_ifsd_1d   !: Reduced-dimension version of a_ifsd for thermodynamic routines
 
    ! ** namelist (namfsd) **
    INTEGER  ::   nn_fsd_ini         ! FSD init. options (0 = none; 1 = all in largest FSD cat; 2 = imposed power law)
@@ -136,7 +133,7 @@ CONTAINS
    END SUBROUTINE ice_fsd_restoring
 
 
-   SUBROUTINE ice_fsd_partition_newice( ki, pv_newice, pv_latgro, pda_latgro )
+   SUBROUTINE ice_fsd_partition_newice( pa_i, pv_i, pa_ifstd, pv_newice, pv_latgro, pda_latgro )
       !!-------------------------------------------------------------------
       !!            ***  ROUTINE ice_fsd_partition_newice  ***
       !!
@@ -178,7 +175,8 @@ CONTAINS
       !!                by default, i.e., without FSD) and the total new ice
       !!                volume added, now (v_newice + v_latgro), is unchanged.
       !!
-      !! ** Input   :   ki              : 1D thermodynamic array index
+      !! ** Input   :   pa_i, pv_i      : local ice concentration and volume (per category)
+      !!                pa_ifstd        : local floe size-thickness distribution
       !!                pv_newice       : volume of new ice to grow in total as
       !!                                  calculated in ice_thd_do, before
       !!                                  accounting for FSD (ln_fsd) and/or
@@ -208,14 +206,17 @@ CONTAINS
       !!
       !!-------------------------------------------------------------------
       !
-      INTEGER                 , INTENT(in)    ::   ki           ! 1-D thermodynamic array index
-      REAL(wp)                , INTENT(inout) ::   pv_newice    ! total new ice volume (from ice_thd_do)
-      REAL(wp)                , INTENT(out)   ::   pv_latgro    ! lateral growth volume
-      REAL(wp), DIMENSION(jpl), INTENT(out)   ::   pda_latgro   ! a_i change due to lateral growth
+      REAL(wp), DIMENSION(jpl)        , INTENT(in)    ::   pa_i         ! local ice concentration (per category)
+      REAL(wp), DIMENSION(jpl)        , INTENT(in)    ::   pv_i         ! local ice volume (per category)
+      REAL(wp), DIMENSION(nn_nfsd,jpl), INTENT(in)    ::   pa_ifstd     ! local floe size-thickness distribution
+      REAL(wp)                        , INTENT(inout) ::   pv_newice    ! local total new ice volume (from ice_thd_do)
+      REAL(wp)                        , INTENT(out)   ::   pv_latgro    ! lateral growth volume
+      REAL(wp), DIMENSION(jpl)        , INTENT(out)   ::   pda_latgro   ! a_i change due to lateral growth
       !
       INTEGER  ::   jl, jf        ! dummy loop indices
       REAL(wp) ::   za_lead       ! lead area for open water growth (per unit ocean area)
       REAL(wp) ::   za_lat_surf   ! lateral surface area of floes (per unit ocean area)
+      REAL(wp) ::   zat_i         ! total ice concentration in grid cell
       REAL(wp) ::   zh_i          ! ice thickness (m)
       REAL(wp) ::   zr_lw         ! width of lead region (m)
       !
@@ -225,6 +226,7 @@ CONTAINS
       pda_latgro(:) = 0._wp
       za_lead       = 0._wp
       za_lat_surf   = 0._wp
+      zat_i         = SUM(pa_i)
       zr_lw         = floe_rc(1)   ! smallest floe size for width of lead region
 
       ! --- Calculate za_lead and za_lat_surf (integrate/sum over thickness
@@ -232,41 +234,40 @@ CONTAINS
       DO jl = 1, jpl
 
          ! need ice thickness (m) for za_lat_surf:
-         IF ( a_i_2d(ki,jl) > 0._wp ) THEN
-            zh_i = v_i_2d(ki,jl) / a_i_2d(ki,jl)
+         IF ( pa_i(jl) > 0._wp ) THEN
+            zh_i = pv_i(jl) / pa_i(jl)
          ELSE
             zh_i = 0._wp
          ENDIF
 
          DO jf = 1, nn_nfsd
             !
-            za_lead = za_lead + a_i_2d(ki,jl) * a_ifsd_2d(ki,jf,jl)   &
-               &                * (2._wp * zr_lw / floe_rc(jf)        &
+            za_lead = za_lead + pa_i(jl) * pa_ifstd(jf,jl)       &
+               &                * (2._wp * zr_lw / floe_rc(jf)   &
                &                   + zr_lw**2 / floe_rc(jf)**2)
             !
-            za_lat_surf = za_lat_surf + a_ifsd_2d(ki,jf,jl) * a_i_2d(ki,jl)   &
+            za_lat_surf = za_lat_surf + pa_ifstd(jf,jl) * pa_i(jl)   &
                &                        * 2._wp * zh_i / floe_rc(jf)
             !
          ENDDO
       ENDDO
 
       ! --- Lead area cannot exceed open water fraction and must be > 0:
-      za_lead = MAX( 0._wp, MIN( za_lead, 1._wp - at_i_1d(ki) ) )
+      za_lead = MAX( 0._wp, MIN( za_lead, 1._wp - zat_i ) )
 
       ! --- Calculate lateral growth volume, zv_latgro, and the change in a_i
       !     due to lateral growth, or leave both as 0 if no lateral growth:
       IF (za_lat_surf > epsi10) THEN
 
-         pv_latgro = pv_newice * za_lead / (1._wp + at_i_1d(ki) / za_lat_surf)
+         pv_latgro = pv_newice * za_lead / (1._wp + zat_i / za_lat_surf)
 
          DO jl = 1, jpl
             DO jf = 1, nn_nfsd
 
                ! note lateral growth rate = zv_latgro / rDt_ice, but here we
                ! calculate the growth over time step which is just zv_latgro:
-               pda_latgro(jl) = pda_latgro(jl)                                  &
-                  &             + 2._wp * a_i_2d(ki,jl) * a_ifsd_2d(ki,jf,jl)   &
-                  &                     * pv_latgro / floe_rc(jf)
+               pda_latgro(jl) = pda_latgro(jl) + 2._wp * pa_i(jl) * pa_ifstd(jf,jl)   &
+                  &                                    * pv_latgro / floe_rc(jf)
 
             ENDDO
          ENDDO
@@ -1124,25 +1125,6 @@ CONTAINS
 
       IF (ierr /= 0) THEN
          CALL ctl_stop('fsd_alloc: could not allocate FSD array (a_ifsd)')
-      ENDIF
-
-      ! Allocate reduced-dimensions versions for thermodynamics.
-      !
-      ! Note: for other SI3 variables these are allocated by ice1D_alloc() (in
-      ! ice1d.F90) which is called by ice_init (in icestp.F90) only. Seems no
-      ! harm to have this here (this subroutine is only called if
-      ! ln_fsd = .true.) but in the future it may be better to move this
-      ! allocation there (and the above allocation of a_ifsd into ice.F90).
-      ALLOCATE(a_ifsd_2d(jpij, nn_nfsd, jpl), STAT=ierr)
-
-      IF (ierr /= 0) THEN
-         CALL ctl_stop('fsd_alloc: could not allocate FSD array (a_ifsd_2d)')
-      ENDIF
-
-      ALLOCATE(a_ifsd_1d(jpij, nn_nfsd), STAT=ierr)
-
-      IF (ierr /= 0) THEN
-         CALL ctl_stop('fsd_alloc: could not allocate FSD array (a_ifsd_1d)')
       ENDIF
 
    END SUBROUTINE fsd_alloc

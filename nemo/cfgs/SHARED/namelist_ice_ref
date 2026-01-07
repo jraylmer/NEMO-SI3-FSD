@@ -206,13 +206,12 @@
    ln_flushing      = .true.          !  activate ice salt flushing
    ln_drainage      = .true.          !  activate ice salt gravity drainage
    rn_simin         =   0.1           !  minimum tolerated ice salinity (g/kg)
-   rn_sinew         =   0.75          !  fraction of sss that is entrapped in new ice 
-                                      !      (must be set to 0.25 if nn_icesal=2)
+   rn_sinew         =   0.75          !  fraction of sss that is entrapped in new ice (same for any nn_icesal)
                   ! -- nn_icesal=1 -- !
    rn_icesal        =   4.            !  ice salinity (g/kg)
                   ! -- nn_icesal=2 -- !
    rn_sal_gd        =   5.            !  restoring ice salinity, gravity drainage (g/kg)
-   rn_time_gd       =   1.73e+6       !  restoring time scale,   gravity drainage  (s)
+   rn_time_gd       =   1.728e+5      !  restoring time scale,   gravity drainage (s)
    rn_sal_fl        =   2.            !  restoring ice salinity, flushing (g/kg)
    rn_time_fl       =   8.64e+5       !  restoring time scale,   flushing (s)
                   ! -- nn_icesal=4 -- !

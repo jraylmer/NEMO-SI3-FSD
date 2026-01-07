@@ -22,7 +22,7 @@ MODULE sbcwave
    USE dom_oce        ! ocean domain variables
    USE sbc_oce        ! Surface boundary condition: ocean fields
    USE bdy_oce        ! open boundary condition variables
-   USE zdf_oce,  ONLY : ln_zdfswm ! Qiao wave enhanced mixing 
+   USE zdf_oce,  ONLY : ln_zdfswm ! Qiao wave enhanced mixing
    USE par_ice,  ONLY : ln_ice_wav, ln_ice_wav_attn, ln_ice_wav_spec ! sea-ice parameters
    !
    USE iom            ! I/O manager library
@@ -40,8 +40,7 @@ MODULE sbcwave
    ! Variables checking if the wave parameters are coupled (if not, they are read from file)
    LOGICAL, PUBLIC ::   cpl_hsig          = .FALSE.
    LOGICAL, PUBLIC ::   cpl_phioc         = .FALSE.
-   LOGICAL, PUBLIC ::   cpl_sdrftx        = .FALSE.
-   LOGICAL, PUBLIC ::   cpl_sdrfty        = .FALSE.
+   LOGICAL, PUBLIC ::   cpl_sdrft         = .FALSE.
    LOGICAL, PUBLIC ::   cpl_wper          = .FALSE.
    LOGICAL, PUBLIC ::   cpl_wnum          = .FALSE.
    LOGICAL, PUBLIC ::   cpl_wstrf         = .FALSE.
@@ -49,8 +48,7 @@ MODULE sbcwave
    LOGICAL, PUBLIC ::   cpl_charn         = .FALSE.
    LOGICAL, PUBLIC ::   cpl_taw           = .FALSE.
    LOGICAL, PUBLIC ::   cpl_bhd           = .FALSE.
-   LOGICAL, PUBLIC ::   cpl_tusd          = .FALSE.
-   LOGICAL, PUBLIC ::   cpl_tvsd          = .FALSE.
+   LOGICAL, PUBLIC ::   cpl_tsd           = .FALSE.
    LOGICAL, PUBLIC ::   cpl_wpf           = .FALSE.
    LOGICAL, PUBLIC ::   cpl_wspec         = .FALSE.
 
@@ -59,24 +57,27 @@ MODULE sbcwave
    INTEGER ::   jp_vsd   ! index of stokes drift  (j-component) (m/s)    at T-point
    INTEGER ::   jp_wmp   ! index of mean wave period            (s)      at T-point
 
-   TYPE(FLD), ALLOCATABLE, DIMENSION(:) ::   sf_cd      ! structure of input fields (file informations, fields read) Drag Coefficient
+   TYPE(FLD), ALLOCATABLE, DIMENSION(:) ::   sf_cdg     ! structure of input fields (file informations, fields read) Drag Coefficient
    TYPE(FLD), ALLOCATABLE, DIMENSION(:) ::   sf_sd      ! structure of input fields (file informations, fields read) Stokes Drift
-   TYPE(FLD), ALLOCATABLE, DIMENSION(:) ::   sf_wn      ! structure of input fields (file informations, fields read) wave number for Qiao
+   TYPE(FLD), ALLOCATABLE, DIMENSION(:) ::   sf_wnum    ! structure of input fields (file informations, fields read) wave number for Qiao
    TYPE(FLD), ALLOCATABLE, DIMENSION(:) ::   sf_tauoc   ! structure of input fields (file informations, fields read) normalized wave stress into the ocean
    TYPE(FLD), ALLOCATABLE, DIMENSION(:) ::   sf_hsw     ! structure of input fields (file informations, fields read) Significant Wave Height
    TYPE(FLD), ALLOCATABLE, DIMENSION(:) ::   sf_wpf     ! structure of input fields (file informations, fields read) Wave Peak Frequency
    TYPE(FLD), ALLOCATABLE, DIMENSION(:) ::   sf_wspec   ! structure of input fields (file informations, fields read) Wave Energy Spectrum
 
-   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:)   ::   cdn_wave        !: Neutral drag coefficient at t-point
+   ! dynamics (Stokes)
    REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:)   ::   hsw             !: Significant Wave Height at t-point
    REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:)   ::   wmp             !: Wave Mean Period at t-point
-   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:)   ::   wnum            !: Wave Number at t-point
    REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:)   ::   wpf             !: Wave Peak Frequency at t-point
-   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:)   ::   tauoc_wave      !: stress reduction factor  at t-point
    REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:)   ::   tsd2d           !: Surface Stokes Drift module at t-point
    REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:)   ::   div_sd          !: barotropic stokes drift divergence
    REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:)   ::   ut0sd, vt0sd    !: surface Stokes drift velocities at t-point
+   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:)   ::   tusd, tvsd      !: Stokes drift transport
    REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:,:) ::   usd, vsd, wsd   !: Stokes drift velocities at u-, v- & w-points, resp.u
+   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:)   ::   bhd_wave        !: Bernoulli head. wave induce pression
+   ! stress
+   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:)   ::   tauoc_wave      !: stress reduction factor  at t-point
+   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:)   ::   cdn_wave        !: Neutral drag coefficient at t-point
 !
    REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:)     ::   wfreq_l         !: Wave frequencies for discretised energy spectrum (lower limits of bins)
    REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:)     ::   wfreq           !: Wave frequencies for discretised energy spectrum ('center' of bins)
@@ -91,11 +92,9 @@ MODULE sbcwave
    REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:)   ::   twoy            !: wave-ocean momentum flux, v
    REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:)   ::   tauoc_wavex     !: stress reduction factor  at, u component
    REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:)   ::   tauoc_wavey     !: stress reduction factor  at, v component
+   ! mixing
    REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:)   ::   phioc           !: tke flux from wave model
-   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:)   ::   KZN2            !: Kz*N2
-   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:)   ::   bhd_wave        !: Bernoulli head. wave induce pression
-   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:)   ::   tusd, tvsd      !: Stokes drift transport
-   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:,:) ::   ZMX             !: Kz*N2
+   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:)   ::   wnum            !: Wave Number at t-point
    !! * Substitutions
 #  include "do_loop_substitute.h90"
 #  include "read_nml_substitute.h90"
@@ -158,7 +157,7 @@ CONTAINS
          DO_2D( 1, 1, 1, 1 ) ! In the deep-water limit we have ke = ||ust0||/( 6 * ||transport|| )
             zsp0          = SQRT( ut0sd(ji,jj)*ut0sd(ji,jj) + vt0sd(ji,jj)*vt0sd(ji,jj) ) !<-- norm of Surface Stokes drift
             tsd2d(ji,jj)  = zsp0
-            IF( cpl_tusd .AND. cpl_tvsd ) THEN  !stokes transport is provided in coupled mode
+            IF( cpl_tsd ) THEN  !stokes transport is provided in coupled mode
                sdtrp      = SQRT( tusd(ji,jj)*tusd(ji,jj) + tvsd(ji,jj)*tvsd(ji,jj) )  !<-- norm of Surface Stokes drift transport
             ELSE
                ! Stokes drift transport estimated from Hs and Tmean
@@ -262,10 +261,10 @@ CONTAINS
         div_sd(:,:) = div_sd(:,:) + ze3divh(:,:,jk)
       END DO
       !
-      CALL iom_put( "ustokes",  usd  )
-      CALL iom_put( "vstokes",  vsd  )
-      CALL iom_put( "wstokes",  wsd  )
-!      !
+      IF( iom_use( "ustokes" ) ) CALL iom_put( "ustokes", usd  )
+      IF( iom_use( "vstokes" ) ) CALL iom_put( "vstokes", vsd  )
+      IF( iom_use( "wstokes" ) ) CALL iom_put( "wstokes", wsd  )
+      !
 #if ! defined key_PSYCLONE_2p5p0
       DEALLOCATE( ze3divh )
       DEALLOCATE( zk_t, zk_u, zk_v, zu0_sd, zv0_sd )
@@ -293,10 +292,10 @@ CONTAINS
       ENDIF
       !
       IF( ln_cdgw .AND. .NOT. cpl_wdrag ) THEN     !==  Neutral drag coefficient  ==!
-         CALL fld_read( kt, nn_fsbc, sf_cd )             ! read from external forcing
-         cdn_wave(:,:) = sf_cd(1)%fnow(:,:,1) * smask0(:,:)
+         CALL fld_read( kt, nn_fsbc, sf_cdg )            ! read from external forcing
+         cdn_wave(:,:) = sf_cdg(1)%fnow(:,:,1) * smask0(:,:)
       ENDIF
-
+      !
       IF( ln_tauoc .AND. .NOT. cpl_wstrf ) THEN    !==  Wave induced stress  ==!
          CALL fld_read( kt, nn_fsbc, sf_tauoc )          ! read stress reduction factor due to wave from external forcing
          tauoc_wave(:,:) = sf_tauoc(1)%fnow(:,:,1) * smask0(:,:)
@@ -312,12 +311,6 @@ CONTAINS
             tauoc_wavex(:,:) = abs(twox(:,:)/tawx(:,:))
             tauoc_wavey(:,:) = abs(twoy(:,:)/tawy(:,:))
          ENDIF
-      ENDIF
-
-      IF ( ln_phioc .and. cpl_phioc .and.  kt == nit000 ) THEN
-         WRITE(numout,*)
-         WRITE(numout,*) 'sbc_wave : PHIOC from wave model'
-         WRITE(numout,*) '~~~~~~~~ '
       ENDIF
 
       IF( .NOT. ln_wave_test ) THEN
@@ -336,8 +329,8 @@ CONTAINS
             hsw(:,:) = sf_hsw(1)%fnow(:,:,1) * tmask(:,:,1)  ! significant wave height at T point
          ENDIF
       ENDIF
-
-      IF( ln_sdw .AND. .NOT. cpl_sdrftx)  THEN       !==  Computation of the 3d Stokes Drift  ==!
+      !
+      IF( ln_sdw .AND. .NOT. cpl_sdrft)  THEN       !==  Computation of the 3d Stokes Drift  ==!
          !
          IF( jpfld > 0 ) THEN                            ! Read from file only if the field is not coupled
             CALL fld_read( kt, nn_fsbc, sf_sd )          ! read wave parameters from external forcing
@@ -348,20 +341,17 @@ CONTAINS
             IF( jp_vsd > 0 )   vt0sd(:,:) = sf_sd(jp_vsd)%fnow(:,:,1) * tmask(:,:,1)  ! 2D meridional Stokes Drift at T point
          ENDIF
 
-         ! Read also wave number if needed, so that it is available in
-         ! coupling routines
-         IF( ln_zdfswm .AND. .NOT. cpl_wnum ) THEN     !==wavenumber==!
-            CALL fld_read( kt, nn_fsbc, sf_wn )             ! read wave parameters from external forcing
-            wnum(:,:) = sf_wn(1)%fnow(:,:,1) * smask0(:,:)
-         ENDIF
- 
-         !
          IF( ((jpfld == 3) .AND. .NOT. cpl_hsig) .OR. ln_wave_test )   &
-            &      CALL sbc_stokes( Kmm )                 ! Calculate only if all required fields are read
+            &      CALL sbc_stokes( Kmm )                ! Calculate only if all required fields are read
             !                                            ! or in wave test case
-         !  !                                            ! In coupled case the call is done after (in sbc_cpl)
+            !                                            ! In coupled case the call is done after (in sbc_cpl)
       ENDIF
-         !
+      !
+      IF( ln_zdfswm .AND. .NOT. cpl_wnum ) THEN     !== wavenumber ==!
+         CALL fld_read( kt, nn_fsbc, sf_wnum )             ! read wave parameters from external forcing
+         wnum(:,:) = sf_wnum(1)%fnow(:,:,1) * smask0(:,:)
+      ENDIF
+      !
    END SUBROUTINE sbc_wave
 
 
@@ -380,18 +370,36 @@ CONTAINS
       INTEGER ::   ifpr
       INTEGER ::   ji, jj, jf    ! dummy loop indices
       !!
-      CHARACTER(len=100)     ::  cn_dir                             ! Root directory for location of drag coefficient files
-      TYPE(FLD_N), ALLOCATABLE, DIMENSION(:) ::   slf_i             ! array of namelist informations on the fields to read
-      TYPE(FLD_N)            ::  sn_cdg, sn_usd, sn_vsd,  sn_wpf,   &
+      CHARACTER(len=100)     ::  cn_dir                            ! Root directory for location of drag coefficient files
+      TYPE(FLD_N), ALLOCATABLE, DIMENSION(:) ::   slf_i            ! array of namelist informations on the fields to read
+      TYPE(FLD_N)            ::  sn_cdg, sn_usd, sn_vsd,  &
                              &   sn_hsw, sn_wmp, sn_wnum, sn_tauoc, &
-                             &   sn_wspec                           ! informations about the fields to be read
+                             &   sn_wpf, sn_wspec                   ! informations about the fields to be read
       !
-      NAMELIST/namsbc_wave/ cn_dir, sn_cdg, sn_usd, sn_vsd, sn_wpf, sn_hsw, sn_wmp, sn_wnum,            &
-         &                  sn_tauoc, sn_wspec, ln_cdgw, ln_sdw, ln_tauoc, ln_stcor, ln_charn, ln_taw,  &
-         &                  ln_phioc, ln_wave_test, ln_bern_srfc, ln_breivikFV_2016, ln_vortex_force,   &
-         &                  ln_stshear, ln_wave_spec, ln_wfreq_usr, ln_wfreq_usr_exp, rn_wfreq_usr,     &
+      NAMELIST/namsbc_wave/ cn_dir, sn_cdg, sn_usd, sn_vsd, sn_hsw, sn_wmp, sn_wnum, sn_tauoc,   &
+         &                  sn_wpf, sn_wspec,                                                    &
+         &                  ln_sdw, ln_wave_test, ln_breivikFV_2016, ln_vortex_force, ln_bern_srfc, &
+         &                  ln_cdgw, ln_charn, ln_tauoc, ln_taw, ln_phioc, ln_stshear, &
+         &                  ln_wave_spec, ln_wfreq_usr, ln_wfreq_usr_exp, rn_wfreq_usr,     &
          &                  nn_nwfreq, rn_wfreq_0, rn_wfreq_k
       !!---------------------------------------------------------------------
+      IF( .NOT. ln_wave ) THEN
+         IF(lwp) WRITE(numout,*)
+         IF(lwp) WRITE(numout,*) '   No surface waves : all wave related logical set to false'
+         ln_sdw   = .FALSE.
+         ln_wave_test = .FALSE.
+         ln_breivikFV_2016 = .FALSE.
+         ln_vortex_force = .FALSE.
+         ln_bern_srfc = .FALSE.
+         ln_cdgw  = .FALSE.
+         ln_charn = .FALSE.
+         ln_tauoc = .FALSE.
+         ln_taw   = .FALSE.
+         ln_phioc = .FALSE.
+         ln_stshear = .FALSE.
+         RETURN
+      ENDIF
+      !
       IF(lwp) THEN
          WRITE(numout,*)
          WRITE(numout,*) 'sbc_wave_init : surface waves in the system'
@@ -404,15 +412,14 @@ CONTAINS
       !
       IF(lwp) THEN
          WRITE(numout,*) '   Namelist namsbc_wave'
-         WRITE(numout,*) '      Stokes drift                                  ln_sdw = ', ln_sdw
+         WRITE(numout,*) '      Stokes drift + Stokes Coriolis + tracer advection ln_sdw = ', ln_sdw
          WRITE(numout,*) '      Breivik 2016                       ln_breivikFV_2016 = ', ln_breivikFV_2016
-         WRITE(numout,*) '      Stokes Coriolis & tracer advection terms    ln_stcor = ', ln_stcor
          WRITE(numout,*) '      Vortex Force                         ln_vortex_force = ', ln_vortex_force
          WRITE(numout,*) '      Bernouilli Head Pressure                ln_bern_srfc = ', ln_bern_srfc
-         WRITE(numout,*) '      wave modified ocean stress                  ln_tauoc = ', ln_tauoc
-         WRITE(numout,*) '      neutral drag coefficient (CORE bulk only)    ln_cdgw = ', ln_cdgw
-         WRITE(numout,*) '      charnock coefficient                        ln_charn = ', ln_charn
-         WRITE(numout,*) '      Stress modificated by wave                    ln_taw = ', ln_taw
+         WRITE(numout,*) '      Stress modificated by waves (forced case)   ln_tauoc = ', ln_tauoc
+         WRITE(numout,*) '      Stress modificated by waves (coupled case)    ln_taw = ', ln_taw
+         WRITE(numout,*) '      Neutral drag coefficient                     ln_cdgw = ', ln_cdgw
+         WRITE(numout,*) '      Charnock coefficient                        ln_charn = ', ln_charn
          WRITE(numout,*) '      TKE flux from wave                          ln_phioc = ', ln_phioc
          WRITE(numout,*) '      Surface shear with Stokes drift           ln_stshear = ', ln_stshear
          WRITE(numout,*) '      Test with constant wave fields          ln_wave_test = ', ln_wave_test
@@ -425,12 +432,18 @@ CONTAINS
       ENDIF
 
       !                                ! option check
-      IF( .NOT.( ln_cdgw .OR. ln_sdw .OR. ln_tauoc .OR. ln_stcor .OR. ln_charn .OR. ln_ice_wav ) )   &
-         &     CALL ctl_warn( 'Ask for wave coupling but ln_cdgw=F, ln_sdw=F, ln_tauoc=F, ln_stcor=F, ln_ice_wav=F')
+      IF( .NOT.( ln_cdgw .OR. ln_sdw .OR. ln_tauoc .OR. ln_charn .OR. ln_ice_wav ) )   &
+         &     CALL ctl_warn( 'Wave coupling/forcing activated but ln_cdgw=F, ln_sdw=F, ln_tauoc=F, ln_ice_wav=F')
       IF( ln_cdgw .AND. ln_blk )   &
          &     CALL ctl_warn( 'drag coefficient read from wave model available ONLY with ln_NCAR and ln_MFS aerobulk options')
-      IF( ln_stcor .AND. .NOT.ln_sdw )   &
-         &     CALL ctl_stop( 'Stokes-Coriolis term calculated only if activated Stokes Drift ln_sdw=T')
+      IF( ln_cdgw .AND. ln_charn )   &
+         &     CALL ctl_stop( 'ln_cdgw=T and ln_charn=T, but only one option can be choosen')
+      IF( ln_tauoc .AND. ln_taw )   &
+         &     CALL ctl_stop( 'ln_tauoc=T and ln_taw=T, but only one option can be choosen')
+      IF( ln_stshear .AND. .NOT.ln_sdw )   &
+         &     CALL ctl_stop( 'Stokes shear term calculated only if activated Stokes Drift ln_sdw=T')
+      IF( ln_bern_srfc .AND. .NOT.cpl_bhd )   &
+         &     CALL ctl_stop( 'ln_bern_srfc option only works in coupled mode')
 
       !            !== Check options for wave/sea-ice interactions ==!
       !
@@ -507,111 +520,114 @@ CONTAINS
       ENDIF
 
       !                             !==  Allocate wave arrays  ==!
-      ALLOCATE( ut0sd (jpi,jpj)    , vt0sd (jpi,jpj) )
-      ALLOCATE( hsw   (jpi,jpj)    , wmp   (jpi,jpj)    , wpf     (jpi,jpj)     )
-      ALLOCATE( tsd2d (jpi,jpj)    , div_sd(jpi,jpj)    , bhd_wave(jpi,jpj)     )
-      ALLOCATE( usd   (jpi,jpj,jpk), vsd   (jpi,jpj,jpk), wsd     (jpi,jpj,jpk) )
-      ALLOCATE( tusd  (jpi,jpj)    , tvsd  (jpi,jpj) )
-      ALLOCATE( wnum  (A2D(0))     , ZMX   (A2D(0),jpk) )
-      ALLOCATE( wspec(jpi,jpj,nn_nwfreq) )
-      usd   (:,:,:) = 0._wp
-      vsd   (:,:,:) = 0._wp
-      wsd   (:,:,:) = 0._wp
-      hsw     (:,:) = 0._wp
-      wmp     (:,:) = 0._wp
-      wpf     (:,:) = 0._wp
-      ut0sd   (:,:) = 0._wp
-      vt0sd   (:,:) = 0._wp
-      tusd    (:,:) = 0._wp
-      tvsd    (:,:) = 0._wp
-      bhd_wave(:,:) = 0._wp
-      ZMX   (:,:,:) = 0._wp
-      wspec (:,:,:) = 0._wp
-!
+      IF( ln_sdw ) THEN
+         ALLOCATE( ut0sd (jpi,jpj), vt0sd (jpi,jpj) )
+         ALLOCATE( wmp   (jpi,jpj) )
+         ALLOCATE( tsd2d (jpi,jpj), div_sd(jpi,jpj) )
+         ALLOCATE( tusd  (jpi,jpj), tvsd  (jpi,jpj) )
+         ALLOCATE( usd   (jpi,jpj,jpk), vsd(jpi,jpj,jpk), wsd(jpi,jpj,jpk) )
+         usd   (:,:,:) = 0._wp
+         vsd   (:,:,:) = 0._wp
+         wsd   (:,:,:) = 0._wp
+         wmp     (:,:) = 0._wp
+         ut0sd   (:,:) = 0._wp
+         vt0sd   (:,:) = 0._wp
+         tusd    (:,:) = 0._wp
+         tvsd    (:,:) = 0._wp
+      ENDIF
+      IF( ln_sdw .OR. ln_ice_wav ) THEN
+         ALLOCATE( hsw(jpi,jpj) )
+         hsw(:,:) = 0._wp
+      ENDIF
+      IF( ln_ice_wav ) THEN
+         ALLOCATE( wpf(jpi,jpj), wspec(jpi,jpj,nn_nwfreq) )
+         wpf  (:,:)   = 0._wp
+         wspec(:,:,:) = 0._wp
+      ENDIF
+      IF( ln_zdfswm    .AND. .NOT. cpl_wnum ) ALLOCATE( wnum    (A2D(0) ) )
+      IF( ln_bern_srfc .AND.       cpl_bhd  ) ALLOCATE( bhd_wave(jpi,jpj) )
+      !
+      IF( ln_cdgw ) THEN                       ! wave drag from wave model
+         IF( .NOT. cpl_wdrag ) THEN
+            ALLOCATE( sf_cdg(1), STAT=ierror )               !* allocate and fill sf_wave with sn_cdg
+            IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_wave_init: unable to allocate sf_cdg structure' )
+                                   ALLOCATE( sf_cdg(1)%fnow(A2D(0),1)   )
+            IF( sn_cdg%ln_tint )   ALLOCATE( sf_cdg(1)%fdta(A2D(0),1,2) )
+            CALL fld_fill( sf_cdg, (/ sn_cdg /), cn_dir, 'sbc_wave_init', 'Wave module', 'namsbc_wave' )
+         ENDIF
+         ALLOCATE( cdn_wave(A2D(0)) )
+         cdn_wave(:,:) = 0._wp
+      ELSE IF ( ln_charn ) THEN                     ! wave drag from Charnok coefficient
+         IF( .NOT. cpl_charn )   CALL ctl_stop( 'STOP', 'Charnock based wind stress can be used in coupled mode only' )
+         ALLOCATE( charn(A2D(0)) )
+         charn(:,:) = 0._wp
+      ENDIF
+
+      IF( ln_taw ) THEN                     ! wind/wave stress x/y components from wave model (coupled only)
+         IF( .NOT. cpl_taw )   CALL ctl_stop( 'STOP', 'wind stress from wave model can be used in coupled mode only, use ln_cdgw instead' )
+         ALLOCATE( tawx(A2D(0)), tawy(A2D(0)) )
+         ALLOCATE( twox(A2D(0)), twoy(A2D(0)) )
+         ALLOCATE( tauoc_wavex(A2D(0)), tauoc_wavey(A2D(0)) )
+         tawx(:,:) = 0._wp
+         tawy(:,:) = 0._wp
+         twox(:,:) = 0._wp
+         twoy(:,:) = 0._wp
+         tauoc_wavex(:,:) = 1._wp
+         tauoc_wavey(:,:) = 1._wp
+      ENDIF
+
+      IF( ln_phioc ) THEN                                  ! normalized wave energy flux
+         IF( .NOT. cpl_phioc )   CALL ctl_stop( 'STOP', 'phioc can be used in coupled mode only' )
+         ALLOCATE( phioc(A2D(0)) )
+         phioc(:,:) = 0._wp
+      ENDIF
+
+      IF( ln_tauoc ) THEN                    ! normalized wave stress into the ocean
+         IF( .NOT. cpl_wstrf ) THEN
+            ALLOCATE( sf_tauoc(1), STAT=ierror )           !* allocate and fill sf_wave with sn_tauoc
+            IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_wave_init: unable to allocate sf_tauoc structure' )
+                                    ALLOCATE( sf_tauoc(1)%fnow(A2D(0),1)   )
+            IF( sn_tauoc%ln_tint )  ALLOCATE( sf_tauoc(1)%fdta(A2D(0),1,2) )
+            CALL fld_fill( sf_tauoc, (/ sn_tauoc /), cn_dir, 'sbc_wave_init', 'Wave module', 'namsbc_wave' )
+         ENDIF
+         ALLOCATE( tauoc_wave(A2D(0)) )
+         tauoc_wave(:,:) = 0._wp
+      ENDIF
+
       IF( ln_wave_test ) THEN       !==  Wave TEST case  ==!   set uniform waves fields
-         jpfld    = 0                   ! No field read
-         ln_cdgw  = .FALSE.             ! No neutral wave drag input
-         ln_tauoc = .FALSE.             ! No wave induced drag reduction factor
-         ut0sd(:,:) = 0.13_wp * tmask(:,:,1)   ! m/s
-         vt0sd(:,:) = 0.00_wp                  ! m/s
-         hsw  (:,:) = 2.80_wp                  ! meters
-         wmp  (:,:) = 8.00_wp                  ! seconds
-         wpf  (:,:) = 0.08_wp                  ! Hz
          !
-         ! For wave spectrum test case calculate Bretschneider formula, which depends on wpf and hsw,
-         ! using test case values defined above. See module icewav, function wav_spec_bret, for
-         ! explanation of expression below (cannot use same function here due to circular dependence;
-         ! may make more sense to move that function to sbcwave, i.e., this, module?)
+         jpfld = 0   ! No field read
          !
-         DO_2D(0,0,0,0)
-            wspec(ji,jj,:) = .3125_wp * hsw(ji,jj)**2 * (wpf(ji,jj)**4 / wfreq(:)**5)   &
-               &           * EXP( -1.25_wp * ( wpf(ji,jj) / wfreq(:) )**4 )
-         END_2D
+         IF( ln_sdw ) THEN
+            ut0sd(:,:) = 0.13_wp * tmask(:,:,1)   ! m/s
+            vt0sd(:,:) = 0.00_wp                  ! m/s
+            wmp  (:,:) = 8.00_wp                  ! seconds
+         ENDIF
+         IF( ln_sdw .OR. ln_ice_wav ) THEN
+            hsw  (:,:) = 2.80_wp                  ! meters
+         ENDIF
+         IF( ln_ice_wav ) THEN
+            wpf  (:,:) = 0.08_wp                  ! Hz
+            !
+            ! For wave spectrum test case calculate Bretschneider formula, which depends on wpf and hsw,
+            ! using test case values defined above. See module icewav, function wav_spec_bret, for
+            ! explanation of expression below (cannot use same function here due to circular dependence;
+            ! may make more sense to move that function to sbcwave, i.e., this, module?)
+            !
+            DO_2D(0,0,0,0)
+               wspec(ji,jj,:) = .3125_wp * hsw(ji,jj)**2 * (wpf(ji,jj)**4 / wfreq(:)**5)   &
+                  &           * EXP( -1.25_wp * ( wpf(ji,jj) / wfreq(:) )**4 )
+            END_2D
+            !
+         ENDIF
          !
       ELSE                          !==  create the structure associated with fields to be read  ==!
-         IF( ln_cdgw ) THEN                       ! wave drag
-            IF( .NOT. cpl_wdrag ) THEN
-               ALLOCATE( sf_cd(1), STAT=ierror )               !* allocate and fill sf_wave with sn_cdg
-               IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_wave_init: unable to allocate sf_wave structure' )
-               !
-                                      ALLOCATE( sf_cd(1)%fnow(A2D(0),1)   )
-               IF( sn_cdg%ln_tint )   ALLOCATE( sf_cd(1)%fdta(A2D(0),1,2) )
-               CALL fld_fill( sf_cd, (/ sn_cdg /), cn_dir, 'sbc_wave_init', 'Wave module ', 'namsbc_wave' )
-            ENDIF
-            ALLOCATE( cdn_wave(A2D(0)) )
-            cdn_wave(:,:) = 0._wp
-         ENDIF
-         IF( ln_charn ) THEN                     ! wave drag
-            IF( .NOT. cpl_charn ) THEN
-               CALL ctl_stop( 'STOP', 'Charnock based wind stress can be used in coupled mode only' )
-            ENDIF
-            ALLOCATE( charn(A2D(0)) )
-            charn(:,:) = 0._wp
-         ENDIF
-         IF( ln_taw ) THEN                     ! wind stress
-            IF( .NOT. cpl_taw ) THEN
-               CALL ctl_stop( 'STOP', 'wind stress from wave model can be used in coupled mode only, use ln_cdgw instead' )
-            ENDIF
-            ALLOCATE( tawx(A2D(0)) )
-            ALLOCATE( tawy(A2D(0)) )
-            ALLOCATE( twox(A2D(0)) )
-            ALLOCATE( twoy(A2D(0)) )
-            ALLOCATE( tauoc_wavex(A2D(0)) )
-            ALLOCATE( tauoc_wavey(A2D(0)) )
-            tawx(:,:) = 0._wp
-            tawy(:,:) = 0._wp
-            twox(:,:) = 0._wp
-            twoy(:,:) = 0._wp
-            tauoc_wavex(:,:) = 1._wp
-            tauoc_wavey(:,:) = 1._wp
-         ENDIF
-
-         IF( ln_phioc ) THEN                     ! TKE flux
-            IF( .NOT. cpl_phioc ) THEN
-                CALL ctl_stop( 'STOP', 'phioc can be used in coupled mode only' )
-            ENDIF
-            ALLOCATE( phioc(A2D(0)) )
-            phioc(:,:) = 0._wp
-         ENDIF
-
-         IF( ln_tauoc ) THEN                    ! normalized wave stress into the ocean
-            IF( .NOT. cpl_wstrf ) THEN
-               ALLOCATE( sf_tauoc(1), STAT=ierror )           !* allocate and fill sf_wave with sn_tauoc
-               IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_wave_init: unable to allocate sf_tauoc structure' )
-               !
-                                       ALLOCATE( sf_tauoc(1)%fnow(A2D(0),1)   )
-               IF( sn_tauoc%ln_tint )  ALLOCATE( sf_tauoc(1)%fdta(A2D(0),1,2) )
-               CALL fld_fill( sf_tauoc, (/ sn_tauoc /), cn_dir, 'sbc_wave_init', 'Wave module', 'namsbc_wave' )
-            ENDIF
-            ALLOCATE( tauoc_wave(A2D(0)) )
-            tauoc_wave(:,:) = 0._wp
-         ENDIF
-
+         
          IF( ln_ice_wav_spec ) THEN             ! wave energy spectrum (currently, needed for wave-ice interactions only)
             IF( .NOT. cpl_wspec ) THEN
                ALLOCATE( sf_wspec(1), STAT=ierror )         !* allocate and fill sf_wspec with sn_wpsec
                IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_wave_init: unable to allocate sf_wspec structure' )
-               ALLOCATE( sf_wspec(1)%fnow(jpi,jpj,nn_nwfreq) )
+                                      ALLOCATE( sf_wspec(1)%fnow(jpi,jpj,nn_nwfreq) )
                IF( sn_wspec%ln_tint ) ALLOCATE( sf_wspec(1)%fdta(jpi,jpj,nn_nwfreq,2) )
                CALL fld_fill( sf_wspec, (/ sn_wspec /), cn_dir, 'sbc_wave', 'Wave module', 'namsbc_wave' )
             ENDIF
@@ -621,7 +637,7 @@ CONTAINS
             IF( .NOT. cpl_wpf ) THEN
                ALLOCATE( sf_wpf(1), STAT=ierror )           !* allocate and fill sf_wpf with sn_wpf
                IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_wave_init: unable to allocate sf_wpf structure' )
-               ALLOCATE( sf_wpf(1)%fnow(jpi,jpj,1) )
+                                    ALLOCATE( sf_wpf(1)%fnow(jpi,jpj,1) )
                IF( sn_wpf%ln_tint ) ALLOCATE( sf_wpf(1)%fdta(jpi,jpj,1,2) )
                CALL fld_fill( sf_wpf, (/ sn_wpf /), cn_dir, 'sbc_wave', 'Wave module', 'namsbc_wave' )
             ENDIF
@@ -631,7 +647,7 @@ CONTAINS
             IF( .NOT. cpl_hsig ) THEN
                ALLOCATE( sf_hsw(1), STAT=ierror )           !* allocate and fill sf_hsw with sn_hsw
                IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_wave_init: unable to allocate sf_hsw structure' )
-               ALLOCATE( sf_hsw(1)%fnow(jpi,jpj,1) )
+                                    ALLOCATE( sf_hsw(1)%fnow(jpi,jpj,1) )
                IF( sn_hsw%ln_tint ) ALLOCATE( sf_hsw(1)%fdta(jpi,jpj,1,2) )
                CALL fld_fill( sf_hsw, (/ sn_hsw /), cn_dir, 'sbc_wave', 'Wave module', 'namsbc_wave' )
             ENDIF
@@ -640,13 +656,11 @@ CONTAINS
          IF( ln_sdw ) THEN                      ! Stokes drift
             ! 1. Find out how many fields have to be read from file if not coupled
             !    (NB. hsw now done separately, above, as it is also needed by icewav, not just sdw)
-            jpfld = 0
+            jpfld=0
             jp_usd=0   ;   jp_vsd=0   ;   jp_wmp=0
-            IF( .NOT. cpl_sdrftx ) THEN
+            IF( .NOT. cpl_sdrft ) THEN
                jpfld  = jpfld + 1
                jp_usd = jpfld
-            ENDIF
-            IF( .NOT. cpl_sdrfty ) THEN
                jpfld  = jpfld + 1
                jp_vsd = jpfld
             ENDIF
@@ -664,21 +678,22 @@ CONTAINS
                IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_wave_init: unable to allocate sf_wave structure' )
                !
                DO ifpr= 1, jpfld
-                  ALLOCATE( sf_sd(ifpr)%fnow(jpi,jpj,1) )
+                                              ALLOCATE( sf_sd(ifpr)%fnow(jpi,jpj,1)   )
                   IF( slf_i(ifpr)%ln_tint )   ALLOCATE( sf_sd(ifpr)%fdta(jpi,jpj,1,2) )
                END DO
                !
-               CALL fld_fill( sf_sd, slf_i, cn_dir, 'sbc_wave_init', 'Wave module ', 'namsbc_wave' )
+               CALL fld_fill( sf_sd, slf_i, cn_dir, 'sbc_wave_init', 'Wave module', 'namsbc_wave' )
                sf_sd(jp_usd)%zsgn = -1._wp   ;  sf_sd(jp_vsd)%zsgn = -1._wp   ! vector field at T point: overwrite default definition of zsgn
+               DEALLOCATE( slf_i )
             ENDIF
             !
             ! 3. Wave number (only needed for Qiao parametrisation, ln_zdfswm=T)
-            IF( .NOT. cpl_wnum ) THEN
-               ALLOCATE( sf_wn(1), STAT=ierror )           !* allocate and fill sf_wave with sn_wnum
-               IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_wave_init: unable to allocate sf_wn structure' )
-                                      ALLOCATE( sf_wn(1)%fnow(A2D(0),1)   )
-               IF( sn_wnum%ln_tint )  ALLOCATE( sf_wn(1)%fdta(A2D(0),1,2) )
-               CALL fld_fill( sf_wn, (/ sn_wnum /), cn_dir, 'sbc_wave', 'Wave module', 'namsbc_wave' )
+            IF( ln_zdfswm .AND. .NOT. cpl_wnum ) THEN
+               ALLOCATE( sf_wnum(1), STAT=ierror )           !* allocate and fill sf_wave with sn_wnum
+               IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_wave_init: unable to allocate sf_wnum structure' )
+                                      ALLOCATE( sf_wnum(1)%fnow(A2D(0),1)   )
+               IF( sn_wnum%ln_tint )  ALLOCATE( sf_wnum(1)%fdta(A2D(0),1,2) )
+               CALL fld_fill( sf_wnum, (/ sn_wnum /), cn_dir, 'sbc_wave', 'Wave module', 'namsbc_wave' )
             ENDIF
             !
          ENDIF

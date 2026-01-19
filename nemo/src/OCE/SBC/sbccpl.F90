@@ -634,6 +634,13 @@ CONTAINS
          smyrcv(jpr_bhd)%laction = .TRUE.
          cpl_bhd = .TRUE.
       ENDIF
+      smyrcv(jpr_tusd)%clname = 'O_Tusd'     ! zonal stokes transport
+      smyrcv(jpr_tvsd)%clname = 'O_Tvsd'     ! meridional stokes transport
+      IF( TRIM(sn_rcv_tsd%cldes ) == 'coupled' )  THEN
+         smyrcv(jpr_tusd)%laction = .TRUE.
+         smyrcv(jpr_tvsd)%laction = .TRUE.
+         cpl_tsd = .TRUE.
+      ENDIF
       smyrcv(jpr_wspec)%clname = 'O_WSpec'   ! Wave energy spectrum
       !
       smyrcv(jpr_wspec)%nlvl = nn_nwfreq     ! Not sure if this is the right approach. nlvl = 1 for everything else and
@@ -1288,21 +1295,19 @@ CONTAINS
       !
       IF( ln_sdw .OR. ln_ice_wav ) THEN   ! Either Stokes drift correction or wave-ice interaction activated
       !                                                      ! ========================= !
+      !                                                      !      Wave mean period     !
+      !                                                      ! ========================= !
+         IF( smyrcv(jpr_wper)%laction ) THEN
+            wmp(A2D(0)) = smyrcv(jpr_wper)%z3(A2D(0),1)
+            CALL lbc_lnk( 'sbccpl', wmp, 'T', 1.0_wp, ldfull = .TRUE. )
+         ENDIF
+      !
+      !                                                      ! ========================= !
       !                                                      !  Significant wave height  !
       !                                                      ! ========================= !
          IF( smyrcv(jpr_hsig)%laction ) THEN
             hsw(A2D(0)) = smyrcv(jpr_hsig)%z3(A2D(0),1)
             CALL lbc_lnk( 'sbccpl', hsw, 'T', 1.0_wp, ldfull = .TRUE. )
-         ENDIF
-      ENDIF
-      !
-      IF( ln_ice_wav ) THEN   ! Wave-ice interaction activated
-      !                                                      ! ========================= !
-      !                                                      !    Wave peak frequency    !
-      !                                                      ! ========================= !
-         IF( smyrcv(jpr_wpf)%laction ) THEN
-            wpf(A2D(0)) = smyrcv(jpr_wpf)%z3(A2D(0),1)
-            CALL lbc_lnk( 'sbccpl', wpf, 'T', 1.0_wp, ldfull = .TRUE. )
          ENDIF
       ENDIF
       !
@@ -1315,15 +1320,6 @@ CONTAINS
             vt0sd(A2D(0)) = smyrcv(jpr_sdrfty)%z3(A2D(0),1)
             CALL lbc_lnk( 'sbccpl', ut0sd, 'T', -1.0_wp, vt0sd, 'T', -1.0_wp, ldfull = .TRUE. )
          ENDIF
-      !
-      !                                                      ! ========================= !
-      !                                                      !      Wave mean period     !
-      !                                                      ! ========================= !
-         IF( smyrcv(jpr_wper)%laction ) THEN
-            wmp(A2D(0)) = smyrcv(jpr_wper)%z3(A2D(0),1)
-            CALL lbc_lnk( 'sbccpl', wmp, 'T', 1.0_wp, ldfull = .TRUE. )
-         ENDIF
-      !
       !                                                      ! ========================= !
       !                                                      !    Vertical mixing Qiao   !
       !                                                      ! ========================= !
@@ -1333,6 +1329,16 @@ CONTAINS
          IF( smyrcv(jpr_sdrftx)%laction .OR. smyrcv(jpr_sdrfty)%laction .OR. &
              smyrcv(jpr_wper)%laction .OR. smyrcv(jpr_hsig)%laction )   THEN
             CALL sbc_stokes( Kmm )
+         ENDIF
+      ENDIF
+      !
+      IF( ln_ice_wav ) THEN   ! Wave-ice interaction activated
+      !                                                      ! ========================= !
+      !                                                      !    Wave peak frequency    !
+      !                                                      ! ========================= !
+         IF( smyrcv(jpr_wpf)%laction ) THEN
+            wpf(A2D(0)) = smyrcv(jpr_wpf)%z3(A2D(0),1)
+            CALL lbc_lnk( 'sbccpl', wpf, 'T', 1.0_wp, ldfull = .TRUE. )
          ENDIF
       ENDIF
       !                                                      ! ========================= !

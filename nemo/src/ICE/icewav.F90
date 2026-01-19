@@ -15,7 +15,8 @@ MODULE icewav
    !!   ice_wav_attn    : calculate attenuated wave spectrum under ice
    !!   ice_wav_calc    : calculate wave properties under ice
    !!   ice_wav_frac    : wave breakup of ice, main routine called by ice_stp
-   !!   wav_frac_dist   : calculate distribution of ice fracture lengths due to waves
+   !!   wav_frac_y24a   : wave fracture scheme (Yang et al. 2024 method A)
+   !!   wav_frac_ht15   : wave fracture scheme (Horvat and Tziperman 2015)
    !!   wav_spec_bret() : Bretschneider wave spectrum formula
    !!   ice_wav_init    : initialisation of wave-ice interaction module
    !!----------------------------------------------------------------------
@@ -66,9 +67,13 @@ MODULE icewav
    PUBLIC ::   ice_wav_frac     ! routine called by ice_stp
    PUBLIC ::   ice_wav_init     ! routine called by ice_init
 
-   REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:)   ::   x1d      ! 1D subdomain for wave fracture in HT15 scheme
-   REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:)   ::   wknum    ! angular wave numbers corresponding to wfreq array (m-1)
-   REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:,:) ::   stmer    ! meridional distance across T cells (m)
+   REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:)   ::   x1d         ! 1D subdomain for wave fracture in HT15 scheme
+   REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:)   ::   wknum       ! angular wave numbers corresponding to wfreq array (m-1)
+   REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:,:) ::   Bfrac_uni   ! uniform fracture redistributor (Y24a scheme)
+   REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:,:) ::   stmer       ! meridional distance across T cells (m)
+
+   INTEGER, PARAMETER ::   jpfrac_y24a = 2   ! option for nn_frac_scheme -> Yang et al. (2024) scheme A
+   INTEGER, PARAMETER ::   jpfrac_ht15 = 4   ! option for nn_frac_scheme -> Horvat and Tziperman (2015) scheme
 
    LOGICAL ::   l_attn_calc_spec   ! whether spectrum needs to be calculated in subroutine ice_wav_attn
    LOGICAL ::   l_frac_calc_spec   ! whether spectrum needs to be calculated in subroutine ice_wav_frac
@@ -78,12 +83,15 @@ MODULE icewav
    REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:,:)   ::   gphit_glo   ! T-grid latitude (degrees north)
 
    !                                     !!* namelist (namwav) *
-   LOGICAL         ::   ln_ice_wav_rand   !: Use random phases for sea surface height in wave fracture calculation
-   INTEGER         ::   nn_ice_wav_nx1d   !: Size of 1D subdomain for wave fracture calculation
-   REAL(wp)        ::   rn_ice_wav_dx1d   !: Increment of 1D subdomain for wave fracture calculation (meters)
-   INTEGER         ::   nn_ice_wav_rmin   !: Radius of smallest floes affected by wave fracture in units of rn_ice_wav_dx1d
    REAL(wp)        ::   rn_ice_wav_ecri   !: Critical strain at which ice fractures due to waves (dimensionless)
    REAL(wp)        ::   rn_attn_lam_tol   !: Attenuation scheme longitude tolerance for identifying meridians (degrees E)
+   INTEGER         ::   nn_frac_scheme    !: Selection of wave-ice fracture scheme
+   REAL(wp)        ::   rn_y24a_cw        !: Parameter in Y24A fracture scheme
+   REAL(wp)        ::   rn_y24a_alpha     !: Parameter in Y24A fracture scheme
+   INTEGER         ::   nn_ht15_nx1d      !: Size of 1D subdomain for wave fracture calculation
+   REAL(wp)        ::   rn_ht15_dx1d      !: Increment of 1D subdomain for wave fracture calculation (meters)
+   INTEGER         ::   nn_ht15_rmin      !: Radius of smallest floes affected by wave fracture in units of rn_ice_wav_dx1d
+   LOGICAL         ::   ln_ht15_rand      !: Use random phases for sea surface height in wave fracture calculation
    !
    ! Note: other namwav parameters declared in par_ice as they are needed by module
    ! ----- sbcwave which cannot access this module (would create circular dependency)
@@ -705,17 +713,30 @@ CONTAINS
             IF( l_frac_calc_spec ) wspec(ji,jj,:) = wav_spec_bret( hsw(ji,jj), wpf(ji,jj) )
 
             ! (2) Calculate source terms for the wave fracture equation
-            !     For now, there is only one scheme (Horvat and Tziperman, 2015)
-            !     But do not do the calculation if the local wave spectrum is too weak:
+            !     This depends on the fracture scheme selected
             !
+            ! Terms in common among > 1 schemes:
             zh_i = vt_i(ji,jj) / at_i(ji,jj)   ! mean ice thickness
             !
-            IF( MAXVAL( wspec(ji,jj,:) ) > epsi06 ) THEN
-               CALL wav_frac_ht15( wspec(ji,jj,:), zh_i, zQfrac(:), zBfrac(:,:) )
-            ELSE
-               zQfrac(:)   = 0._wp
-               zBfrac(:,:) = 0._wp
-            ENDIF
+            SELECT CASE( nn_frac_scheme )
+               CASE( jpfrac_y24a )
+                  !
+                  CALL wav_frac_y24a( hsw(ji,jj), wmp(ji,jj), zh_i, zQfrac(:), zBfrac(:,:) )
+                  !
+               CASE( jpfrac_ht15 )
+                  !
+                  ! Do not do this calculation if local wave spectrum is too weak
+                  ! (note: other schemes are much cheaper so similar checks not needed):
+                  IF( MAXVAL( wspec(ji,jj,:) ) > epsi06 ) THEN
+                     CALL wav_frac_ht15( wspec(ji,jj,:), zh_i, zQfrac(:), zBfrac(:,:) )
+                  ENDIF
+                  !
+               CASE DEFAULT
+                  !
+                  zQfrac(:)   = 0._wp
+                  zBfrac(:,:) = 0._wp
+                  !
+            END SELECT
 
             ! Proceed only if some fractures can occur, implied by non-zero zQfrac.
             ! Fracturing quantified by zQfrac is applied to each ice thickness category
@@ -816,9 +837,109 @@ CONTAINS
    END SUBROUTINE ice_wav_frac
 
 
+   SUBROUTINE wav_frac_y24a( phsw, pwmp, ph_i, pQfrac, pBfrac )
+      !!-------------------------------------------------------------------
+      !!                 *** ROUTINE wav_frac_y24a ***
+      !!
+      !! ** Purpose :   Calculate the probability and redistribution functions for the
+      !!                equation evolving the FSD due to wave fracture for the first scheme
+      !!                of Yang et al. (2024), called scheme A here.
+      !!
+      !! ** Method  :   Assume waves break ice if the strain e exceeds a critical value,
+      !!                where the strain is calculated from input wave statistics:
+      !!
+      !!                   e = 5 * pi^4 * h_i * H_s / (2 * g^2 * T_m^4)
+      !!
+      !!                where h_i is mean ice thickness, H_s is significant wave height, g is
+      !!                gravity, and T_m is the mean wave period. This formula is as in Yang et al.
+      !!                (2024, Eqs. 15-16) except mean wavelength has been converted to T_m using
+      !!                the deep water surface gravity wave dispersion relation, lambda = g*T^2/(2*pi).
+      !!
+      !!                If e >= e_crit (namelist parameter rn_ice_wav_ecri), the probability of floes
+      !!                fracturing is given by a simple exponential profile:
+      !!
+      !!                   Q(r) = c_w * exp[ -alpha * (1 - r/rmax)]
+      !!
+      !!                where c_w is a constant (sets maximum probability of the largest floes
+      !!                fracturing), alpha is a constant (determines strength of probability
+      !!                reduction at smaller floe sizes), and rmax is the largest resolved floe size.
+      !!                This formula differs slightly from Eq. (13) in Yang et al. (2024) which
+      !!                is presumed to have a typesetting mistake in the exponent.
+      !!
+      !!                The redistribution function is determined by assuming any floe of size s
+      !!                that is undergoing wave fracture is equally likely to fracture into any
+      !!                other floe size r < s. This 'uniform redistributor' is calculated in
+      !!                subroutine ice_wav_init as it is a constant.
+      !!
+      !! ** Inputs  :   phsw                    :   local significant wave height (m)
+      !!                pwmp                    :   local wave mean period (s)
+      !!                ph_i                    :   local (grid cell) mean sea ice thickness (m)
+      !!
+      !! ** Outputs :   pQfrac(nn_nfsd)         :   fracture probability function (s-1)
+      !!                pBfrac(nn_nfsd,nn_nfsd) :   fracture redistribution function, B(s,r)dr
+      !!                                            (note: first  index corresponds to original floe size s,
+      !!                                                   second index corresponds to fractured floe size r)
+      !!
+      !! ** Callers :   ice_wav_frac --> [wav_frac_y24a]
+      !!
+      !! ** References
+      !!    ----------
+      !!    Yang, C.-Y., Liu, J., & Chen, D. (2024).
+      !!              Understanding the influence of ocean waves on Arctic sea ice simulation:
+      !!              a modelling study with an atmosphere-ocean-wave-sea ice coupled model.
+      !!              The Cryosphere, 18(3), 1215-1239.
+      !!
+      !!-------------------------------------------------------------------
+      !
+      REAL(wp)                            , INTENT(in)    ::   phsw     ! grid cell significant wave height (m)
+      REAL(wp)                            , INTENT(in)    ::   pwmp     ! grid cell wave mean period (s)
+      REAL(wp)                            , INTENT(in)    ::   ph_i     ! grid cell mean ice thickness (m)
+      REAL(wp), DIMENSION(nn_nfsd)        , INTENT(inout) ::   pQfrac   ! wave fracture probability function (s-1)
+      REAL(wp), DIMENSION(nn_nfsd,nn_nfsd), INTENT(inout) ::   pBfrac   ! wave fracture redistribution function, B(s,r)dr
+      !
+      INTEGER             ::   jf, jf2                ! dummy loop indices
+      REAL(wp)            ::   zstrain           ! ice strain due to waves
+      REAL(wp), PARAMETER ::   zalpha = 1.0_wp   ! exponent factor in Q(r)
+      REAL(wp), PARAMETER ::   zcw    = 0.8_wp   ! scaling term for Q(r)
+      !
+      !!-------------------------------------------------------------------
+
+      zstrain = 2.5_wp * rpi**4 * ph_i * phsw / (grav**2 * pwmp**4)
+
+      IF( zstrain >= rn_ice_wav_ecri ) THEN
+         DO jf = 1, nn_nfsd
+            pQfrac(jf) = rn_y24a_cw * EXP( -rn_y24a_alpha * (1._wp - floe_rc(jf) / floe_rc(nn_nfsd)) )
+         ENDDO
+      ELSE
+         pQfrac(:) = 0._wp
+      ENDIF
+
+      pBfrac(:,:) = Bfrac_uni(:,:)   ! uniform redistribution
+
+      IF(lwp) THEN
+         WRITE(numout,*) '<<<<<<<<<'
+         WRITE(numout,*) 'Y24A: h_i = ', ph_i
+         WRITE(numout,*) 'Y24A: h_s = ', phsw
+         WRITE(numout,*) 'Y24A: wmp = ', pwmp
+         WRITE(numout,*) 'Y24A: Q(r) = '
+         DO jf = 1, nn_nfsd
+            WRITE(numout,*) '      ', pQfrac(jf)
+         ENDDO
+         WRITE(numout,*) 'Y24A: beta(r1,r2) = '
+         DO jf = 1, nn_nfsd
+            WRITE(numout,'(A,I0,A)') '       beta(', jf, ',:) ='
+            DO jf2 = 1, nn_nfsd
+               WRITE(numout,*) '            ', pBfrac(jf,jf2)
+            ENDDO
+         ENDDO
+         WRITE(numout,*) '>>>>>>>>>'
+      ENDIF
+   END SUBROUTINE wav_frac_y24a
+
+
    SUBROUTINE wav_frac_ht15( pWspec, ph_i, pQfrac, pBfrac )
       !!-------------------------------------------------------------------
-      !!                 *** ROUTINE wav_frac_dist ***
+      !!                 *** ROUTINE wav_frac_ht15 ***
       !!
       !! ** Purpose :   Calculate the probability and redistribution functions for the
       !!                equation evolving the FSD due to wave fracture for the scheme
@@ -900,12 +1021,12 @@ CONTAINS
       INTEGER                              ::   jx, jy, jf              ! dummy loop indices
       INTEGER                              ::   ixlo, ixhi              ! indices of x1d to locate extrema
       INTEGER                              ::   ixfrac                  ! number of fracture points along x1d
-      LOGICAL , DIMENSION(nn_ice_wav_nx1d) ::   llmin, llmax, llext     ! sea surface height is a min / is a max / is an extrema
+      LOGICAL , DIMENSION(nn_ht15_nx1d)    ::   llmin, llmax, llext     ! sea surface height is a min / is a max / is an extrema
       REAL(wp), DIMENSION(nn_nwfreq)       ::   zphi                    ! phase of wave spectrum components (rad)
-      REAL(wp), DIMENSION(nn_ice_wav_nx1d) ::   zssh                    ! sea surface height along x1d (m)
+      REAL(wp), DIMENSION(nn_ht15_nx1d)    ::   zssh                    ! sea surface height along x1d (m)
       REAL(wp)                             ::   zdx, zdxlo, zdxhi       ! distances between x1d points in finite difference computation (m)
       REAL(wp)                             ::   zstrain                 ! strain experienced by sea ice due to wave field
-      REAL(wp), DIMENSION(nn_ice_wav_nx1d) ::   zxfrac                  ! distances to points along x1d at which ice fractures
+      REAL(wp), DIMENSION(nn_ht15_nx1d)    ::   zxfrac                  ! distances to points along x1d at which ice fractures
       REAL(wp)                             ::   zfrac_rad               ! floe radius of a piece of fractured ice (m)
       REAL(wp), DIMENSION(nn_nfsd)         ::   zWfrac                  ! fracture distribution (multiplied by dr; dimensionless)
       !
@@ -933,11 +1054,11 @@ CONTAINS
       ENDDO
 
       ! Find local extrema in sea surface height, defined to be minima or maxima over
-      ! a 'moving window' of (2*nn_ice_wav_rmin + 1) points in the 1D subdomain x1d:
+      ! a 'moving window' of (2*nn_ht15_rmin + 1) points in the 1D subdomain x1d:
       !
-      DO jx = 1 + nn_ice_wav_rmin, nn_ice_wav_nx1d - nn_ice_wav_rmin
-         llmax(jx) = ( MAXLOC( zssh(jx-nn_ice_wav_rmin:jx+nn_ice_wav_rmin), DIM=1 ) == (nn_ice_wav_rmin + 1) )
-         llmin(jx) = ( MINLOC( zssh(jx-nn_ice_wav_rmin:jx+nn_ice_wav_rmin), DIM=1 ) == (nn_ice_wav_rmin + 1) )
+      DO jx = 1 + nn_ht15_rmin, nn_ht15_nx1d - nn_ht15_rmin
+         llmax(jx) = ( MAXLOC( zssh(jx-nn_ht15_rmin:jx+nn_ht15_rmin), DIM=1 ) == (nn_ht15_rmin + 1) )
+         llmin(jx) = ( MINLOC( zssh(jx-nn_ht15_rmin:jx+nn_ht15_rmin), DIM=1 ) == (nn_ht15_rmin + 1) )
          llext(jx) = (llmin(jx) .OR. llmax(jx))
       ENDDO
 
@@ -948,7 +1069,7 @@ CONTAINS
       ! Loop start/end indices correspond to first/last possible index that could
       ! possibly be at the centre of a triplet.
       !
-      DO jx = 2 + nn_ice_wav_rmin, nn_ice_wav_nx1d - nn_ice_wav_rmin - 1
+      DO jx = 2 + nn_ht15_rmin, nn_ht15_nx1d - nn_ht15_rmin - 1
          !
          ! Reset values for next loop iteration. Note: re-using local integer variables
          ! ixlo and ixhi from above; now they are the indices of x1d corresponding to the
@@ -970,7 +1091,7 @@ CONTAINS
             !
             ! Identify nearest extrema on the right [such that x1d(jx) < x1d(ixhi)]:
             !
-            DO jy = jx+1, nn_ice_wav_nx1d
+            DO jy = jx+1, nn_ht15_nx1d
                IF( llext(jy) ) THEN
                   ixhi = jy
                   EXIT
@@ -1073,7 +1194,7 @@ CONTAINS
          DO jf = 1, nn_nfsd
             !
             ! Q(r) = 1/(D/2) * int[ r'W(r')dr' ] for r' < r:
-            pQfrac(jf) = 2._wp * SUM(zWfrac(1:jf-1)) / (x1d(nn_ice_wav_nx1d) - x1d(1))
+            pQfrac(jf) = 2._wp * SUM(zWfrac(1:jf-1)) / (x1d(nn_ht15_nx1d) - x1d(1))
             !
             ! Divide B(s,r)dr calculated above by the integral/sum over r
             ! This normalises it so that int[ B(s,r)dr ] = 1
@@ -1256,14 +1377,17 @@ CONTAINS
       !!
       !!-------------------------------------------------------------------
       !
-      INTEGER ::   ji, jj, ji_glo, jj_glo   ! Dummy loop indices
-      INTEGER ::   ierr                     ! Local integer output status for allocate
-      INTEGER ::   ios, ioptio              ! Local integer output status for namelist read
+      INTEGER  ::   ji, jj, jf1, jf2, ji_glo, jj_glo   ! Dummy loop indices
+      INTEGER  ::   ierr                               ! Local integer output status for allocate
+      INTEGER  ::   ios, ioptio                        ! Local integer output status for namelist read
+      !
+      REAL(wp) ::   zc1, zc2                           ! Terms for uniform fracture redistributor (Bfrac_uni)
       !
       !!
-      NAMELIST/namwav/ ln_ice_wav     , ln_ice_wav_attn, ln_ice_wav_spec, ln_ice_wav_rand,   &
-         &             nn_ice_wav_nx1d, rn_ice_wav_dx1d, nn_ice_wav_rmin, rn_ice_wav_ecri,   &
-         &             rn_attn_lam_tol
+      NAMELIST/namwav/ ln_ice_wav     , ln_ice_wav_spec, rn_ice_wav_ecri, nn_frac_scheme,   &
+         &             rn_y24a_cw     , rn_y24a_alpha  ,                                    &
+         &             nn_ht15_nx1d   , rn_ht15_dx1d   , nn_ht15_rmin   , ln_ht15_rand  ,   &
+         &             ln_ice_wav_attn, rn_attn_lam_tol
       !!-------------------------------------------------------------------
       !
       READ_NML_REF(numnam_ice, namwav)
@@ -1279,11 +1403,16 @@ CONTAINS
          WRITE(numout,*) '         Activate wave-in-ice attenuation scheme or not     ln_ice_wav_attn = ', ln_ice_wav_attn
          WRITE(numout,*) '            Longitude tolerance for meridians (deg E)       rn_attn_lam_tol = ', rn_attn_lam_tol
          WRITE(numout,*) '         Read full wave energy spectrum or not              ln_ice_wav_spec = ', ln_ice_wav_spec
-         WRITE(numout,*) '         Use random phases for wave breakup or not          ln_ice_wav_rand = ', ln_ice_wav_rand
-         WRITE(numout,*) '         Size of 1D subdomain for wave breakup              nn_ice_wav_nx1d = ', nn_ice_wav_nx1d
-         WRITE(numout,*) '         Increment of 1D subdomain for wave breakup (m)     rn_ice_wav_dx1d = ', rn_ice_wav_dx1d
-         WRITE(numout,*) '         Radius of smallest floes affected by waves (dx1d)  nn_ice_wav_rmin = ', nn_ice_wav_rmin
          WRITE(numout,*) '         Critical strain at which ice breaks due to waves   rn_ice_wav_ecri = ', rn_ice_wav_ecri
+         WRITE(numout,*) '         Wave fracture scheme selection                     nn_frac_scheme  = ', nn_frac_scheme
+         WRITE(numout,'(A,I0,A)') '            Yang et al. (2024) A scheme parameters (nn_frac_scheme = ', jpfrac_y24a, '):'
+         WRITE(numout,*) '               Probability function parameter c_w           rn_y24a_cw      = ', rn_y24a_cw
+         WRITE(numout,*) '               Probability function parameter alpha         rn_y24a_alpha   = ', rn_y24a_alpha
+         WRITE(numout,'(A,I0,A)') '            Horvant & Tziperman (2015) scheme parameters (nn_frac_scheme = ', jpfrac_ht15, '):'
+         WRITE(numout,*) '               Size of 1D subdomain for SSH                    nn_ht15_nx1d = ', nn_ht15_nx1d
+         WRITE(numout,*) '               Increment of 1D subdomain for (m)               rn_ht15_dx1d = ', rn_ht15_dx1d
+         WRITE(numout,*) '               Smallest floe radius affected by waves (dx1d)   nn_ht15_rmin = ', nn_ht15_rmin
+         WRITE(numout,*) '               Use random phases or not                        ln_ht15_rand = ', ln_ht15_rand
       ENDIF
 
       IF( ln_ice_wav ) THEN
@@ -1306,17 +1435,49 @@ CONTAINS
 
          ! Allocate and define module constants
          !
+         ! If fracture scheme uses constant redistributor function, calculate it now
+         ! (see Zhang et al. 2015; JGR:O for theory):
+         IF( nn_frac_scheme == jpfrac_y24a ) THEN
+            !
+            ALLOCATE( Bfrac_uni(nn_nfsd,nn_nfsd), STAT=ierr )
+            !
+            IF(ierr /= 0) CALL ctl_stop('ice_wav_init: could not allocate array: Bfrac_uni')
+            !
+            Bfrac_uni(:,:) = 0._wp
+            !
+            zc1 = floe_rc(1) / floe_rc(nn_nfsd)   ! = rmin/rmax
+            zc2 = 1._wp - zc1
+            !
+            DO jf1 = 1, nn_nfsd
+               DO jf2 = 1, nn_nfsd
+                  IF(          (zc1*floe_rc(jf1) <= floe_rc(jf2))          &
+                     &   .AND. (floe_rc(jf2) <= zc2*floe_rc(jf1)) ) THEN
+                     !
+                     Bfrac_uni(jf1,jf2) = floe_dr(jf2) / ((zc2 - zc1)*floe_rc(jf1))
+                  ENDIF
+               ENDDO
+               ! Normalise so that integral of Bfrac_uni(r1,r2)*dr2 = 1:
+               IF( SUM(Bfrac_uni(jf1,:)) > 0._wp )   &
+                  &   Bfrac_uni(jf1,:) = Bfrac_uni(jf1,:) / SUM(Bfrac_uni(jf1,:))
+               !
+            ENDDO
+            !
+         ENDIF
+
          ! Sub-gridscale domain (1D axis in direction of wave propagation) for
-         ! computation of wave fracture distribution in subroutine wav_frac_dist:
-         ALLOCATE( x1d(nn_ice_wav_nx1d), STAT=ierr )
-         !
-         IF (ierr /= 0) CALL ctl_stop('ice_wav_init: could not allocate array: x1d')
-         !
-         x1d(1) = 0._wp   ! x1d = 0., dx, 2*dx, ...
-         !
-         DO ji = 2, nn_ice_wav_nx1d
-            x1d(ji) = x1d(ji-1) + rn_ice_wav_dx1d
-         ENDDO
+         ! computation of wave fracture distribution in subroutine wav_frac_ht15:
+         IF( nn_frac_scheme == jpfrac_ht15 ) THEN
+            !
+            ALLOCATE( x1d(nn_ht15_nx1d), STAT=ierr )
+            !
+            IF (ierr /= 0) CALL ctl_stop('ice_wav_init: could not allocate array: x1d')
+            !
+            x1d(1) = 0._wp   ! x1d = 0., dx, 2*dx, ...
+            !
+            DO ji = 2, nn_ht15_nx1d
+               x1d(ji) = x1d(ji-1) + rn_ht15_dx1d
+            ENDDO
+         ENDIF
 
          ! If using wave attenuation scheme, allocate/prepare the global coordinate arrays.
          IF( ln_ice_wav_attn ) THEN
@@ -1348,13 +1509,11 @@ CONTAINS
          !
          ! Key point is that attenuation scheme (ln_ice_wav_attn) calculates attenuated wave spectrum
          ! So if NOT reading spectrum from file/model, need to calculate spectrum only if that scheme
-         ! is also NOT activated (first line of condition below).
+         ! is also NOT activated, and this is all only needed for the HT15 fracture scheme.
          !
-         ! If ARE reading spectrum, spectrum is thus available whether attenuation scheme is active
-         ! or not (second line of condition below).
-         !
-         l_frac_calc_spec =      ( (.NOT. ln_ice_wav_spec) .AND. (.NOT. ln_ice_wav_attn) )   &
-            &               .OR. ( ln_ice_wav_spec )
+         l_frac_calc_spec =       (.NOT. ln_ice_wav_spec)           &
+            &               .AND. (.NOT. ln_ice_wav_attn)           &
+            &               .AND. (nn_frac_scheme == jpfrac_ht15)
 
          ! Similar for routine ice_wav_attn (attenuation scheme): it will need to compute the wave
          ! spectrum everywhere (regardless of ice presence) only if the wave spectrum is NOT read in:
@@ -1366,7 +1525,7 @@ CONTAINS
             WRITE(numout,*) '                    ==> wave attenuation scheme will calculate spectrum = ', l_attn_calc_spec
          ENDIF
 
-      ENDIF
+      ENDIF   ! ln_ice_wav
 
    END SUBROUTINE ice_wav_init
 

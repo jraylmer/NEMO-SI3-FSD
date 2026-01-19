@@ -351,16 +351,23 @@
 &namwav         ! wave-ice interactions
 !------------------------------------------------------------------------------
    ln_ice_wav       = .false.         ! activate wave-ice interactions (T) or not (F)
-      !                               ! (note: if T, also need ln_fsd=T in namfsd and ln_wave=T in namsbc)
+                                      ! (note: if T, also need ln_fsd=T in namfsd and ln_wave=T in namsbc)
                    ! -- input/config  -- !
       ln_ice_wav_attn = .false.          ! activate wave-in-ice attenuation scheme (Roach et al. 2018)
-         rn_attn_lam_tol = 1.5           ! longitude tolerance for identifying meridians (degrees east)
+         rn_attn_lam_tol = 1.5           !   longitude tolerance for identifying meridians (degrees east)
       ln_ice_wav_spec = .false.          ! read full wave energy spectrum from wave model or forcing
-      !                                  ! (note: if T, also need ln_wave_spec=T in namsbc_wave)
+                                         ! (note: if T, also need ln_wave_spec=T in namsbc_wave)
                    ! -- wave breakup  -- !
-      ln_ice_wav_rand = .false.          ! use random phases when calculating sea surface height
-      nn_ice_wav_nx1d = 10000            ! number of points in 1D subdomain for wave fracture calculation
-      rn_ice_wav_dx1d = 1.               ! increment of 1D subdomain for wave fracture calculation (meters)
-      nn_ice_wav_rmin = 10               ! radius of smallest floes affected by wave fracture in units of rn_ice_wav_dx1d
-      rn_ice_wav_ecri = 3.e-05           ! critical strain at which ice fractures
+      rn_ice_wav_ecri = 3.e-05           ! critical strain at which ice fractures (dimensionless)
+      nn_frac_scheme  = 4                ! Wave fracture scheme selection
+                                         !    2 = Yang et al. 2024 (A)
+                                         !    4 = Horvat and Tziperman (2015)
+                 ! -- nn_frac_scheme=2 --!
+         rn_y24a_cw    = 0.8             ! Fracture probability function tuning parameter (0 < cw <= 1)
+         rn_y24a_alpha = 1.0             ! Fracture probability function tuning parameter (alpha > 0)
+                 ! -- nn_frac_scheme=4 --!
+         ln_ht15_rand = .false.          ! use random phases when calculating sea surface height (SSH)
+         nn_ht15_nx1d = 10000            ! number of points in 1D subdomain for SSH
+         rn_ht15_dx1d = 1.               ! increment of 1D subdomain for SSH calculation (m)
+         nn_ht15_rmin = 10               ! radius of smallest floes affected by wave fracture in units of rn_ice_wav_dx1d
 /

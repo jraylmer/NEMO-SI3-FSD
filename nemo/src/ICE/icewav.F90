@@ -916,24 +916,6 @@ CONTAINS
 
       pBfrac(:,:) = Bfrac_uni(:,:)   ! uniform redistribution
 
-      IF(lwp) THEN
-         WRITE(numout,*) '<<<<<<<<<'
-         WRITE(numout,*) 'Y24A: h_i = ', ph_i
-         WRITE(numout,*) 'Y24A: h_s = ', phsw
-         WRITE(numout,*) 'Y24A: wmp = ', pwmp
-         WRITE(numout,*) 'Y24A: Q(r) = '
-         DO jf = 1, nn_nfsd
-            WRITE(numout,*) '      ', pQfrac(jf)
-         ENDDO
-         WRITE(numout,*) 'Y24A: beta(r1,r2) = '
-         DO jf = 1, nn_nfsd
-            WRITE(numout,'(A,I0,A)') '       beta(', jf, ',:) ='
-            DO jf2 = 1, nn_nfsd
-               WRITE(numout,*) '            ', pBfrac(jf,jf2)
-            ENDDO
-         ENDDO
-         WRITE(numout,*) '>>>>>>>>>'
-      ENDIF
    END SUBROUTINE wav_frac_y24a
 
 

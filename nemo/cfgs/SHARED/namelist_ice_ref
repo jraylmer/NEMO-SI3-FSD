@@ -361,6 +361,7 @@
       rn_ice_wav_ecri = 3.e-05           ! critical strain at which ice fractures (dimensionless)
       nn_frac_scheme  = 4                ! Wave fracture scheme selection
                                          !    2 = Yang et al. 2024 (A)
+                                         !    3 = Yang et al. 2024 (B)
                                          !    4 = Horvat and Tziperman (2015)
                  ! -- nn_frac_scheme=2 --!
          rn_y24a_cw    = 0.8             ! Fracture probability function tuning parameter (0 < cw <= 1)

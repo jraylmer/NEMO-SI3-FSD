@@ -16,8 +16,10 @@ MODULE icewav
    !!   ice_wav_calc    : calculate wave properties under ice
    !!   ice_wav_frac    : wave breakup of ice, main routine called by ice_stp
    !!   wav_frac_y24a   : wave fracture scheme (Yang et al. 2024 method A)
+   !!   wav_frac_y24b   : wave fracture scheme (Yang et al. 2024 method B)
    !!   wav_frac_ht15   : wave fracture scheme (Horvat and Tziperman 2015)
    !!   wav_spec_bret() : Bretschneider wave spectrum formula
+   !!   wav_spec_rayl() : Rayleigh spectrum expressed as function of frequency
    !!   ice_wav_init    : initialisation of wave-ice interaction module
    !!----------------------------------------------------------------------
 
@@ -69,10 +71,12 @@ MODULE icewav
 
    REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:)   ::   x1d         ! 1D subdomain for wave fracture in HT15 scheme
    REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:)   ::   wknum       ! angular wave numbers corresponding to wfreq array (m-1)
+   REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:)   ::   wlam        ! wavelengths corresponding to wfreq array (m)
    REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:,:) ::   Bfrac_uni   ! uniform fracture redistributor (Y24a scheme)
    REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:,:) ::   stmer       ! meridional distance across T cells (m)
 
    INTEGER, PARAMETER ::   jpfrac_y24a = 2   ! option for nn_frac_scheme -> Yang et al. (2024) scheme A
+   INTEGER, PARAMETER ::   jpfrac_y24b = 3   ! option for nn_frac_scheme -> Yang et al. (2024) scheme B
    INTEGER, PARAMETER ::   jpfrac_ht15 = 4   ! option for nn_frac_scheme -> Horvat and Tziperman (2015) scheme
 
    LOGICAL ::   l_attn_calc_spec   ! whether spectrum needs to be calculated in subroutine ice_wav_attn
@@ -687,15 +691,16 @@ CONTAINS
       ! Control:
       IF( ln_timing )   CALL timing_start('ice_wav_frac')
 
-      ! Calculate angular wave number (2 * pi / wavelength) assuming dispersion relation of
-      ! surface deep water gravity waves (this array is a constant, so calculate once.
+      ! Calculate wavelength and angular wave number (2 * pi / wavelength) assuming dispersion
+      ! relation of surface deep water gravity waves (these arrays are constants, so calculate once.
       ! Cannot do this in ice_wav_init as that is called before sbc_wave_init..)
       !
       ! ToDo: move this to sbc_wave_init?
       !
       IF( kt == nit000 ) THEN   ! at first time-step
-         ALLOCATE( wknum(nn_nwfreq) )
-         wknum(:) = 4._wp * rpi**2 * wfreq(:)**2 / grav
+         ALLOCATE( wlam(nn_nwfreq), wknum(nn_nwfreq) )
+         wlam(:)  = grav / (2._wp * rpi * wfreq(:)**2)
+         wknum(:) = 2._wp * rpi / wlam(:)
       ENDIF
 
       !-----------------!
@@ -722,6 +727,10 @@ CONTAINS
                CASE( jpfrac_y24a )
                   !
                   CALL wav_frac_y24a( hsw(ji,jj), wmp(ji,jj), zh_i, zQfrac(:), zBfrac(:,:) )
+                  !
+               CASE( jpfrac_y24b )
+                  !
+                  CALL wav_frac_y24b( wmp(ji,jj), wspec(ji,jj,:), zh_i, zQfrac(:), zBfrac(:,:) )
                   !
                CASE( jpfrac_ht15 )
                   !
@@ -897,7 +906,7 @@ CONTAINS
       REAL(wp), DIMENSION(nn_nfsd)        , INTENT(inout) ::   pQfrac   ! wave fracture probability function (s-1)
       REAL(wp), DIMENSION(nn_nfsd,nn_nfsd), INTENT(inout) ::   pBfrac   ! wave fracture redistribution function, B(s,r)dr
       !
-      INTEGER             ::   jf, jf2                ! dummy loop indices
+      INTEGER             ::   jf                ! dummy loop indices
       REAL(wp)            ::   zstrain           ! ice strain due to waves
       REAL(wp), PARAMETER ::   zalpha = 1.0_wp   ! exponent factor in Q(r)
       REAL(wp), PARAMETER ::   zcw    = 0.8_wp   ! scaling term for Q(r)
@@ -917,6 +926,143 @@ CONTAINS
       pBfrac(:,:) = Bfrac_uni(:,:)   ! uniform redistribution
 
    END SUBROUTINE wav_frac_y24a
+
+
+   SUBROUTINE wav_frac_y24b( pwmp, pWspec, ph_i, pQfrac, pBfrac )
+      !!-------------------------------------------------------------------
+      !!                 *** ROUTINE wav_frac_y24b ***
+      !!
+      !! ** Purpose :   Calculate the probability and redistribution functions for the equation
+      !!                evolving the FSD due to wave fracture based on the second ('semi empirical')
+      !!                fracture scheme of Yang et al. (2024), called scheme B here.
+      !!
+      !! ** Method  :   This scheme asserts that each spectral component of the local wave field
+      !!                can be considered individually to determine whether it fractures ice or not
+      !!                under a strain failure criterion as function of frequency:
+      !!
+      !!                   e(f) =  2 * pi^2 * A(f) * h_i / L(f)^2
+      !!
+      !!                where A(f) and L(f) are the wave component amplitude and wavelength:
+      !!
+      !!                   A(f) = sqrt( 2 * E(f) * df(f) )
+      !!                   L(f) = g / (2 * pi * f^2)
+      !!
+      !!                where E(f) is the local wave energy spectrum and df is the spectral bandwidth.
+      !!                Note L(f) is calculated already as a module constant. The above e(f) formula
+      !!                is the maximum of the strain (h_i/2)y"(x) for a plane wave
+      !!                y(x) = A(f)sin(kx + wt) with k = 2pi/L(f).
+      !!
+      !!                Assuming a Rayleigh distribution of wave frequencies, P(f)df, determines the
+      !!                probability, q(L)dL, of each spectral class leading to fracture:
+      !!
+      !!                   q(L)dL = / P(f)df   e(f) >= e_crit
+      !!                            \ 0        e(f) <  e_crit
+      !!
+      !!                [NB. Rayleigh spectrum is usually expressed in terms of wave period T = 1/f,
+      !!                but function wav_spec_rayl() returns it in terms of f (to simplify the code
+      !!                by avoiding having to define coordinate arrays for T). Here, it would make
+      !!                more sense to express it in terms of wavelength (see conditions on floe
+      !!                size below), but since we are always going to integrate over the spectral
+      !!                class, we can just go from P(f)df = P(T)dT = P(L)dL directly.]
+      !!
+      !!                This scheme also makes assumptions relating wavelength L to floe size r:
+      !!
+      !!                   1) Wavelength L can only break a floe of diameter 2s if L < 2s
+      !!                   2) Fractured floe diameter 2r is half the triggering wavelength, so r = L/4
+      !!
+      !!                From this follows:
+      !!
+      !!                   Q(s) = int[ q(L') ] dL'   where the integral is from L' = 0 to 2s
+      !!
+      !!                            int[ q(L') * Theta(2s - L') * delta(4r - L') ] dL'
+      !!                   B(s,r) = --------------------------------------------------
+      !!                                    int[ q(L') * Theta(2s - L') ] dL'
+      !!
+      !!                where Theta(x) = {1 if x >= 0; 0 otherwise}, delta(x) = {1 if x = 0; 0 otherwise},
+      !!                and the integral is over all wavelengths L. In the code we just check the conditions
+      !!                are met explicitly for each combination of s, r, and L rather than using the last
+      !!                formal equation.
+      !!
+      !! ** Inputs  :   pwmp                    :   local wave mean period (s)
+      !!                pWspec(nn_nwfreq)       :   local wave spectrum (spectral energy density; m2.Hz-1)
+      !!                ph_i                    :   local (grid cell) mean sea ice thickness (m)
+      !!
+      !! ** Outputs :   pQfrac(nn_nfsd)         :   fracture probability function (s-1)
+      !!                pBfrac(nn_nfsd,nn_nfsd) :   fracture redistribution function, B(s,r)dr
+      !!                                            (note: first  index corresponds to original floe size s,
+      !!                                                   second index corresponds to fractured floe size r)
+      !!
+      !! ** Callers :   ice_wav_frac --> [wav_frac_y24b]
+      !!
+      !! ** References
+      !!    ----------
+      !!    Yang, C.-Y., Liu, J., & Chen, D. (2024).
+      !!              Understanding the influence of ocean waves on Arctic sea ice simulation:
+      !!              a modelling study with an atmosphere-ocean-wave-sea ice coupled model.
+      !!              The Cryosphere, 18(3), 1215-1239.
+      !!
+      !!-------------------------------------------------------------------
+      !
+      REAL(wp)                            , INTENT(in)    ::   pwmp     ! grid cell wave mean period (s)
+      REAL(wp)                            , INTENT(in)    ::   ph_i     ! grid cell mean ice thickness (m)
+      REAL(wp), DIMENSION(nn_nwfreq)      , INTENT(in)    ::   pWspec   ! local wave spectral energy density (m2.Hz-1)
+      REAL(wp), DIMENSION(nn_nfsd)        , INTENT(inout) ::   pQfrac   ! wave fracture probability function (s-1)
+      REAL(wp), DIMENSION(nn_nfsd,nn_nfsd), INTENT(inout) ::   pBfrac   ! wave fracture redistribution function, B(s,r)dr
+      !
+      INTEGER                        ::   jf1, jf2, jw   ! dummy loop indices
+      REAL(wp), DIMENSION(nn_nwfreq) ::   zamp           ! spectral amplitudes (m)
+      REAL(wp), DIMENSION(nn_nwfreq) ::   zstrain        ! ice strain due to waves per spectral class
+      REAL(wp), DIMENSION(nn_nwfreq) ::   zprayl         ! Rayleigh spectrum (Hz-1)
+      REAL(wp), DIMENSION(nn_nwfreq) ::   zprob          ! probability of fracturing per spectral class
+      !
+      !!-------------------------------------------------------------------
+
+      zamp    = SQRT( 2._wp * pWspec(:) * wdfreq(:) )            ! spectral amplitudes (m)
+      zstrain = 2._wp * rpi**2 * ph_i * zamp(:) / (wlam(:)**2)   ! ice strain per spectral class
+      zprayl  = wav_spec_rayl( pwmp )                            ! local Rayleigh spectrum (Hz-1)
+
+      ! Probability of waves of each frequency class resulting in fracture:
+      zprob(:) = 0._wp
+      WHERE( zstrain >= rn_ice_wav_ecri ) zprob = zprayl * wdfreq   ! = q(f)df = q(L)dL
+
+      pQfrac(:)   = 0._wp
+      pBfrac(:,:) = 0._wp
+
+      DO jf1 = 1, nn_nfsd
+         !
+         ! Calculate Q(s) <==> pQfrac(jf1):
+         DO jw = 1, nn_nwfreq
+            ! Each spectral class can only break ice if wavelength L < initial floe diameter
+            ! Note: dL is already (implicitly) multiplied into zprob earlier:
+            IF( wlam(jw) < 2._wp * floe_rc(jf1) ) THEN
+               pQfrac(jf1) = pQfrac(jf1) + zprob(jw)
+            ENDIF
+         ENDDO
+         !
+         ! Calculate B(s,r)dr <==> pBfrac(jf1,jf2):
+         DO jf2 = 1, nn_nfsd
+            ! Each spectral class can only break ice if wavelength L < initial floe diameter
+            ! And it can only break ice into floes of diameter L/2
+            ! For the latter, we check fracture floe size is within the floe size category limits:
+            DO jw = 1, nn_nwfreq
+               IF(          (wlam(jw) < 2._wp * floe_rc(jf1) )   &
+                  &   .AND. (wlam(jw) / 4._wp >= floe_rl(jf2))   &
+                  &   .AND. (wlam(jw) / 4._wp <  floe_ru(jf2))   ) THEN
+                  !
+                  pBfrac(jf1,jf2) = pBfrac(jf1,jf2) + zprob(jw)
+               ENDIF
+            ENDDO
+            ! Recall pBfrac includes dr factor; pBfrac(jf1,jf2) <==> B(s,r)*dr:
+            pBfrac(jf1,jf2) = pBfrac(jf1,jf2) * floe_dr(jf2)
+            !
+         ENDDO
+         !
+         ! Normalise:
+         IF( SUM(pBfrac(jf1,:)) > 0._wp ) pBfrac(jf1,:) = pBfrac(jf1,:) / SUM(pBfrac(jf1,:))
+         !
+      ENDDO
+
+   END SUBROUTINE wav_frac_y24b
 
 
    SUBROUTINE wav_frac_ht15( pWspec, ph_i, pQfrac, pBfrac )
@@ -1256,6 +1402,63 @@ CONTAINS
    END FUNCTION wav_spec_bret
 
 
+   FUNCTION wav_spec_rayl( pwmp_l )
+      !!-------------------------------------------------------------------
+      !!                *** FUNCTION wav_spec_rayl ***
+      !!-------------------------------------------------------------------
+      !!
+      !! ** Purpose :   Calculate local Rayleigh spectrum P(f)
+      !!
+      !! ** Method  :   P(f) = 2.7 * exp[ -0.675 / (T_m * f)^4 ] / (T_m^4 * f^5)
+      !!
+      !!                where f is frequency and T_m is mean wave period. The equation
+      !!                is normalised so that that the integral of P over all f is 1.
+      !!
+      !! ** Inputs  :   pwmp_l : local wave mean period
+      !!
+      !! ** Outputs :   local Rayleigh spectrum of frequencies, P(f) (Hz-1)
+      !!
+      !! ** Notes   :   The Rayleigh spectrum is usually expressed in terms of period, but wave-ice
+      !!                fracture is implemented using frequency for all spectra so here it has been
+      !!                converted from P(T)dT -> P(f)df. See Bretschneider (1959, Eq. 3.35) for P(T)
+      !!                and then the above follows using T = 1/f. For now this is only needed by the
+      !!                Yang et al. (2024) 'semi-empirical' fracture scheme (jpfrac_y24b) so this
+      !!                saves creating yet another, separate set of coordinate arrays for wave period
+      !!                and spectral class widths in terms of period just for this one calculation.
+      !!
+      !!                Note that in Yang et al. (2024), their Eq. (19) for P(T) is incorrect (suspect
+      !!                they used Bretschneider's Eq. 3.34 by mistake, which expresses the Rayleigh
+      !!                spectrum in standard form, i.e., in terms of tau = T/T_m).
+      !!
+      !! ** Invokers:   wav_frac_y24b  --> [wav_spec_rayl()]   (nn_frac_scheme == jpfrac_y24b)
+      !!
+      !! ** References
+      !!    ----------
+      !!    Bretschneider, C. L. (1959).
+      !!              Wave variability and wave spectra for wind-generated gravity waves.
+      !!              Technical Memorandum No. 118, Beach Erosion Board, U.S. Army Corps of Engineers, Washington, DC, USA.
+      !!    Yang, C.-Y., Liu, J., & Chen, D. (2024).
+      !!              Understanding the influence of ocean waves on Arctic sea ice simulation:
+      !!              a modelling study with an atmosphere-ocean-wave-sea ice coupled model.
+      !!              The Cryosphere, 18(3), 1215-1239.
+      !!
+      !!-------------------------------------------------------------------
+      !
+      REAL(wp), INTENT(in)           ::   pwmp_l             ! local wave mean period (s)
+      REAL(wp), DIMENSION(nn_nwfreq) ::   wav_spec_rayl      ! local Rayleigh spectrum P(f) (Hz-1)
+      !
+      !!-------------------------------------------------------------------
+
+      wav_spec_rayl(:) = 2.7_wp * EXP( -.675_wp / (pwmp_l * wfreq(:))**4 ) / (pwmp_l**4 * wfreq(:)**5)
+
+      ! Normalise (equation is normalised in theory, but discretisation leads to errors):
+      IF( SUM(wav_spec_rayl(:) * wdfreq(:) ) > 0._wp ) THEN
+         wav_spec_rayl(:) = wav_spec_rayl(:) / SUM( wav_spec_rayl(:) * wdfreq(:) )
+      ENDIF
+
+   END FUNCTION wav_spec_rayl
+
+
    SUBROUTINE wav_calc_stmer
       !!-------------------------------------------------------------------
       !!                 *** ROUTINE wav_calc_stmer ***
@@ -1491,11 +1694,11 @@ CONTAINS
          !
          ! Key point is that attenuation scheme (ln_ice_wav_attn) calculates attenuated wave spectrum
          ! So if NOT reading spectrum from file/model, need to calculate spectrum only if that scheme
-         ! is also NOT activated, and this is all only needed for the HT15 fracture scheme.
+         ! is also NOT activated, and this is all only needed for certain fracture schemes.
          !
          l_frac_calc_spec =       (.NOT. ln_ice_wav_spec)           &
             &               .AND. (.NOT. ln_ice_wav_attn)           &
-            &               .AND. (nn_frac_scheme == jpfrac_ht15)
+            &               .AND. (nn_frac_scheme == jpfrac_y24b .OR. nn_frac_scheme == jpfrac_ht15)
 
          ! Similar for routine ice_wav_attn (attenuation scheme): it will need to compute the wave
          ! spectrum everywhere (regardless of ice presence) only if the wave spectrum is NOT read in:

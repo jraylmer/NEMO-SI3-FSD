@@ -24,6 +24,7 @@ MODULE icefsd
    PRIVATE
 
    PUBLIC ::   ice_fsd_init               ! routine called by ice_stp
+   PUBLIC ::   ice_fsd_istate             ! routine called by ice_istate, ice_rst_read
    PUBLIC ::   ice_fsd_wri                ! routine called by ice_stp
    PUBLIC ::   ice_fsd_restoring          ! routine called by ice_stp
    PUBLIC ::   fsd_cleanup                ! routine called by ice_wav_frac [TODO: sort out names/distinction of this and ice_fsd_cleanup]
@@ -1108,34 +1109,11 @@ CONTAINS
    END SUBROUTINE fsd_initbounds
 
 
-   SUBROUTINE fsd_alloc
+   SUBROUTINE ice_fsd_istate
       !!-------------------------------------------------------------------
-      !!                 *** ROUTINE fsd_alloc ***
-      !!-------------------------------------------------------------------
+      !!                 ***  ROUTINE ice_fsd_istate  ***
       !!
-      !! ** Purpose :   Allocate floe size distribution variables
-      !!
-      !!-------------------------------------------------------------------
-      !
-      INTEGER ::   ierr   ! ALLOCATE status return value
-      !
-      !!-------------------------------------------------------------------
-
-      ALLOCATE(a_ifsd(jpi, jpj, nn_nfsd, jpl), STAT=ierr)
-
-      IF (ierr /= 0) THEN
-         CALL ctl_stop('fsd_alloc: could not allocate FSD array (a_ifsd)')
-      ENDIF
-
-   END SUBROUTINE fsd_alloc
-
-
-   SUBROUTINE fsd_init
-      !!-------------------------------------------------------------------
-      !!                 ***  ROUTINE fsd_init  ***
-      !!
-      !! ** Purpose :   Set initial values of floe size distribution variable
-      !!                a_ifsd.
+      !! ** Purpose :   Set initial values of floe size distribution
       !!
       !! ** Method  :   Set values based on namelist (namfsd) nn_fsd_ini:
       !!                   0 = no initialisation (i.e., all FSD values = 0)
@@ -1164,50 +1142,99 @@ CONTAINS
       !
       !!-------------------------------------------------------------------
 
-      a_ifsd(:,:,:,:) = 0._wp
-
-      ! This logical probably needs to have an "and no FSD info saved"
-      ! (e.g., if restarting?)...
-      IF (ln_iceini) THEN
+      ! === Warnings / Checks === !
+      !
+      ! Warn about and force initialisation of FSD to zero if:
+      !         NOT restarting                                   (     ln_rstart == F)
+      !    and: NOT reading from restart file                    (nn_iceini_file /= 2)
+      !    and: NOT initialising ice                             (     ln_iceini == F)
+      !    and: user has selected non-zero initialisation of FSD (    nn_fsd_ini /= 0)
+      !
+      ! Note: if restart read fails (e.g., previous run with no FSD or wrong number of
+      !       floe size categories in restart file), then this routine is called from
+      !       ice_rst_read and we use nn_fsd_ini option and no need to force zero init.
+      !
+      IF(          (.NOT. (ln_rstart .OR. nn_iceini_file == 2)) &
+         &   .AND. (.NOT. ln_iceini) .AND. (nn_fsd_ini /= 0)    ) THEN
          !
-         IF( nn_fsd_ini == 1 ) THEN
-            !
-            ! --- Put all ice in largest floe size category
-            !
-            a_ifsd(:,:,nn_nfsd,:) = 1._wp
-            !
-         ELSEIF( nn_fsd_ini == 2) THEN
-            !
-            ! --- Following CICE/Icepack, initialise with a power law distribution
-            !     using parameters given by Perovich and Jones (2014). Fraction of
-            !     sea ice in each floe size and thickness category is the same for
-            !     all grid cells (even where there is no sea ice) initially
-            !
-            ztotfrac = 0._wp
-            !
-            ! Initial FSD is the same for each ice thickness category; calculate
-            ! for first category:
-            DO jf = 1, nn_nfsd
-               ! Calculate power law FSD number distribution based on Perovich
-               ! and Jones (2014) and convert to area fraction distribution:
-               a_ifsd(:,:,jf,1) = (2._wp * floe_rc(jf)) ** (-rn_fsd_ini_alpha - 1._wp)   &
-                  &               * floe_ac(jf) * floe_dr(jf)
+         IF(lwp) CALL ctl_warn('ice_fsd_istate ===>>> : ln_iceini = F, ln_restart = F, but nn_fsd_ini /= 0', &
+            &                  'we set nn_fsd_ini = 0 anyway')
+         !
+         nn_fsd_ini = 0
+      ENDIF
 
-               ztotfrac = ztotfrac + a_ifsd(1,1,jf,1)
-            ENDDO
-            !
-            a_ifsd(:,:,:,1) = a_ifsd(:,:,:,1) / ztotfrac   ! normalise
-            !
-            ! Assign same initial FSD to remaining thickness categories:
-            DO jl = 2, jpl
-               a_ifsd(:,:,:,jl) = a_ifsd(:,:,:,1)
-            ENDDO
-            !
+      ! Stop if user has selected initialisation of FSD to 0 and either ln_iceini = T (general
+      ! ice initialisation active) or (ln_rstart = T or nn_iceini_file = 2) (reading restarts)
+      !
+      ! If we are here, and (ln_rstart = T or nn_iceini_file == 2), this indicates restart read was
+      ! attempted but the restart file has no FSD variables or wrong number of floe size categories
+      ! and so is bypassed. Either way, initialising FSD to 0 everywhere while other state variables
+      ! are non-zero does not make sense so we stop and ask the user to choose nn_fsd_ini > 0.
+      !
+      IF( (nn_fsd_ini == 0) ) THEN
+         ! Check ln_iceini (NOTE: its value is only relevant when NOT reading from restart!)
+         IF( ln_iceini .AND. .NOT. (ln_rstart .OR. (nn_iceini_file == 2)) ) THEN
+            CALL ctl_stop( 'ice_fsd_istate ===>>> : init. of FSD to 0 despite other state variables non-zero init.', &
+               &           'Need to choose nn_fsd_ini > 0 (or set ln_iceini = F)')
          ENDIF
+         ! Check if we are here after bypassing restart read on FSD:
+         IF( ln_rstart .OR. (nn_iceini_file == 2) ) THEN
+            CALL ctl_stop( 'ice_fsd_istate ===>>> : init. of FSD to 0 while other state variables init. from restart', &
+               &           '(previous run with no FSD or wrong number of categories)'                                , &
+               &           'Need to choose nn_fsd_ini > 0')
+         ENDIF
+      ENDIF
+
+      ! We have no specific treatment for FSD if reading from a 'single category file' (nn_iceini_file == 1)
+      ! If user wishes to start FSD from file, it must be a restart file, which is done in ice_rst_read
+      ! for cases ln_restart = T .OR. (ln_iceini = T and nn_iceini_file == 2)
+      !
+      ! (NOTE: value of nn_iceini_file only relevant when NOT reading from restart!)
+      IF( nn_iceini_file == 1 .AND. (.NOT. ln_rstart) ) THEN
+         CALL ctl_warn( 'ice_fsd_istate ===>>> : Single-category file read (nn_iceini_file == 1) not possible for FSD', &
+            &           'we initialise FSD internally (i.e., NOT from file) according to nn_fsd_ini')
+      ENDIF
+
+      ! === Initialise FSD values === !
+      !
+      IF( nn_fsd_ini <= 0 ) THEN
+         IF(lwp) WRITE(numout,*) '   ice_fsd_istate   ==>>   initial FSD = 0 (no initialisation)'
+         !
+         a_ifsd(:,:,:,:) = 0._wp
+         !
+      ELSEIF( nn_fsd_ini == 1 ) THEN
+         IF(lwp) WRITE(numout,*) '   ice_fsd_istate   ==>>   floes initially all in largest category'
+         !
+         a_ifsd(:,:,nn_nfsd,:) = 1._wp
+         !
+      ELSE  ! >= 2
+         IF(lwp) WRITE(numout,*) '   ice_fsd_istate   ==>>   imposed power law for initial FSD everywhere'
+         !
+         ztotfrac = 0._wp
+         !
+         ! Initial FSD is the same for each ice thickness category
+         ! Calculate for first category:
+         DO jf = 1, nn_nfsd
+            ! Calculate power law FSD number distribution based on Perovich
+            ! and Jones (2014) and convert to area fraction distribution:
+            a_ifsd(:,:,jf,1) = (2._wp * floe_rc(jf)) ** (-rn_fsd_ini_alpha - 1._wp)   &
+               &               * floe_ac(jf) * floe_dr(jf)
+
+            ztotfrac = ztotfrac + a_ifsd(1,1,jf,1)
+         ENDDO
+         !
+         a_ifsd(:,:,:,1) = a_ifsd(:,:,:,1) / ztotfrac   ! normalise
+         !
+         ! Assign same initial FSD to remaining thickness categories:
+         DO jl = 2, jpl
+            a_ifsd(:,:,:,jl) = a_ifsd(:,:,:,1)
+         ENDDO
          !
       ENDIF
 
-   END SUBROUTINE fsd_init
+      IF(lwp) WRITE(numout,*) ''
+
+   END SUBROUTINE ice_fsd_istate
 
 
    SUBROUTINE ice_fsd_init
@@ -1225,6 +1252,7 @@ CONTAINS
       !!-------------------------------------------------------------------
       INTEGER ::   jf            ! Local loop index for FSD categories
       INTEGER ::   ios, ioptio   ! Local integer output status for namelist read
+      INTEGER ::   ierr          ! Local integer allocate status
       !!
       NAMELIST/namfsd/ ln_fsd, nn_nfsd, rn_floeshape, nn_fsd_ini, rn_fsd_ini_alpha,   &
          &             rn_fsd_r_newice, rn_fsd_amin_weld, rn_fsd_c_weld, rn_fsd_t_restore
@@ -1251,20 +1279,21 @@ CONTAINS
       ENDIF
 
       IF(ln_fsd) THEN
+
+         ALLOCATE(a_ifsd(jpi,jpj,nn_nfsd,jpl), STAT=ierr)
+         IF (ierr /= 0)   CALL ctl_stop('ice_fsd_init: could not allocate FSD array (a_ifsd)')
+
          CALL fsd_initbounds
 
          ! Writing the FSD bounds in CICE/Icepack is done within its analogue
          ! of the fsd_init_bounds subroutine. I think it makes more sense here,
          ! continuing from the above printing.
-
+         !
          IF(lwp) THEN   ! continue control print
             DO jf = 1, nn_nfsd
                WRITE(numout,*) floe_rl(jf), ' < fsd Cat ', jf, ' < ', floe_ru(jf)
             ENDDO
          ENDIF
-
-         CALL fsd_alloc  ! could come before fsd_initbounds
-         CALL fsd_init   ! must come after fsd_alloc
 
       ENDIF
 

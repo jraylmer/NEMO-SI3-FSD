@@ -22,6 +22,7 @@ MODULE icerst
    USE oce     , ONLY : ts                          ! SAS ss[st]_m init
    USE eosbn2  , ONLY : l_useCT, eos_pt_from_ct     ! SAS ss[st]_m init
    USE iceistate      ! sea-ice: initial state
+   USE icefsd  , ONLY : a_ifsd, ice_fsd_istate      ! floe size distribution variable and state-initialisation routine
    !
    Use in_out_manager ! I/O manager
    USE iom            ! I/O manager library
@@ -174,6 +175,17 @@ CONTAINS
          CALL iom_rstput( iter, nitrst, numriw, znam , z3d )
       END DO
       !
+      ! Floe size distribution (optional)
+      IF( ln_fsd ) THEN
+         ! treat floe size categories as 'layers' (analogous to e_s, for instance)
+         DO jk = 1, nn_nfsd
+            WRITE(zchar1,'(I2.2)') jk
+            znam = 'a_ifsd'//'_l'//zchar1
+            z3d(:,:,:) = a_ifsd(:,:,jk,:)
+            CALL iom_rstput( iter, nitrst, numriw, znam, z3d )
+         ENDDO
+      ENDIF
+      !
       ! fields needed for Met Office (Jules) coupling
       IF( ln_cpl ) THEN
          CALL iom_rstput( iter, nitrst, numriw, 'cnd_ice', cnd_ice )
@@ -206,7 +218,7 @@ CONTAINS
       INTEGER, INTENT(in) :: Kbb, Kmm, Kaa ! ocean time level indices
       INTEGER           ::   jk
       LOGICAL           ::   llok
-      INTEGER           ::   id0, id1, id2, id3, id4, id5, id6, id_nlay   ! local integer
+      INTEGER           ::   id0, id1, id2, id3, id4, id5, id6, id_nlay, id_nfsd   ! local integer
       CHARACTER(len=25) ::   znam
       CHARACTER(len=2)  ::   zchar, zchar1
       REAL(wp)          ::   zfice, ziter
@@ -350,6 +362,38 @@ CONTAINS
             DO jk = 1, nlay_i
                szv_i(:,:,jk,:) = sv_i(:,:,:) * r1_nlay_i
             ENDDO
+         ENDIF
+         ! Floe size distribution
+         IF( ln_fsd ) THEN
+            ! check size of the input fields
+            ! (note: floe size category dimension => for restart purposes is treated analogously to, e.g., e_i)
+            id_nfsd = 0
+            DO jk = 1, 99
+               WRITE(zchar1,'(I2.2)') jk
+               znam = 'a_ifsd'//'_l'//zchar1
+               IF( iom_varid( numrir, znam , ldstop = .FALSE. ) > 0 )   id_nfsd = id_nfsd + 1
+            ENDDO
+            ! only use if correct number of categories present in restart
+            ! (we do not/cannot check the actual category bounds are consistent)
+            IF( id_nfsd == nn_nfsd ) THEN
+               DO jk = 1, nn_nfsd
+                  WRITE(zchar1,'(I2.2)') jk
+                  znam = 'a_ifsd'//'_l'//zchar1
+                  CALL iom_get( numrir, jpdom_auto, znam, z3d )
+                  a_ifsd(:,:,jk,:) = z3d(:,:,:)
+               ENDDO
+            ELSE
+               IF( id_nfsd == 0 ) THEN
+                  IF(lwp) WRITE(numout,*) '   ==>>   previous run without floe size distribution output'
+               ELSE
+                  CALL ctl_warn( 'ice_rst_read ===>>>> : inconsistent number of floe size categories in ice restart',  &
+                     &           '   check number of floe size categories in namelist vs restart file'              ,  &
+                     &           '   reading of FSD variables from restart is bypassed' )
+               ENDIF
+               !
+               CALL ice_fsd_istate   ! initialise FSD if not getting from restart
+               !
+            ENDIF
          ENDIF
 
          CALL iom_delay_rst( 'READ', numrir )   ! read all delayed global communication variables (if not already done)

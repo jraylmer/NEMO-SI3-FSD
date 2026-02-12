@@ -25,6 +25,7 @@ MODULE iceistate
 # endif
    USE ice            ! sea-ice: variables
    USE icevar  , ONLY : ice_var_salprof, ice_var_itd
+   USE icefsd  , ONLY : ice_fsd_istate      ! floe size distribution
    !
    USE in_out_manager ! I/O manager
    USE iom            ! I/O manager library
@@ -391,6 +392,12 @@ CONTAINS
         at_i(:,:) = SUM( a_i, dim=3 )
          !
       ENDIF ! ln_iceini
+      !
+      ! === floe size distribution === !
+      !
+      ! Multiple options to initialise FSD handled by ice_fsd_istate (in icefsd.F90)
+      ! (it checks for the case ln_iceini = F and forces initial FSD = 0 if so):
+      IF( ln_fsd )   CALL ice_fsd_istate
       !
       !----------------------------------------------------------
       ! 4) Adjust ssh and vertical scale factors to snow-ice mass

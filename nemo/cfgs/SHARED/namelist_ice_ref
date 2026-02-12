@@ -330,7 +330,7 @@
      !
      nn_nfsd          = 12              ! number of floe size distribution categories
      rn_floeshape     = 0.66            ! floe shape parameter (dimensionless)
-     nn_fsd_ini       = 2               ! initialisation of FSD option
+     nn_fsd_ini       = 2               ! initialisation of FSD option (must be > 0 if ln_iceini = .true.)
                                         !   0 = no initialisation (forced if ln_iceini = .false.)
                                         !   1 = all ice in largest floe size category
                                         !   2 = imposed power law (same distribution everywhere, all grid points)

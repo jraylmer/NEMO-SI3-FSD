@@ -289,6 +289,12 @@ CONTAINS
       !
       CALL ice_thd_init                ! set ice thermodynics parameters (clem: important to call it first for melt ponds)
       !
+      CALL ice_fsd_init                ! set ice floe-size distribution parameters
+      !                                !    Must come before ice_istate_init, ice_rst_read, and ice_dyn_init
+      !                                !    This initialises FSD variables, sets number of FSD categories, and initial FSD
+      !                                !    option from namelist &namfsd
+      !                                !    Advection routines need number of FSD categories
+      !
       CALL ice_sbc_init                ! set ice-ocean and ice-atm. coupling parameters
       !
       CALL ice_istate_init             ! Initial sea-ice state
@@ -300,10 +306,6 @@ CONTAINS
       CALL ice_var_glo2eqv(1)
       CALL ice_var_agg(1)
       !
-      CALL ice_fsd_init                ! set ice floe-size distribution parameters (this must come
-      !                                ! *after* ice_istate_init since FSD needs to know initial conditions options,
-      !                                ! but *before* ice_dyn_init, because advection initialisation routines need to
-      !                                ! know number of FSD categories)
       !
       CALL ice_wav_init                ! set wave-ice interaction module parameters
       !                                ! (this must come after ice_fsd_init)

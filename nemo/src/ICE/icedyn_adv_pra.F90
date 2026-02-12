@@ -1311,6 +1311,7 @@ CONTAINS
       INTEGER ::   jk, jl   ! dummy loop indices
       INTEGER ::   iter     ! local integer
       INTEGER ::   id1, id0      ! local integer
+      INTEGER ::   id_nfsd       ! number of FSD advection moments in restart, to check consistency
       CHARACTER(len=25) ::   znam
       CHARACTER(len=2)  ::   zchar, zchar1
       REAL(wp), DIMENSION(jpi,jpj,jpl) ::   z3d   ! 3D workspace
@@ -1455,6 +1456,43 @@ CONTAINS
                ENDIF
             ENDIF
             !
+            IF( ln_fsd ) THEN                                         ! floe size distribution
+               ! check size of the input fields
+               ! (note: floe size category dimension => for restart purposes is treated analogously to, e.g., heat content
+               !  we check correct number of sxfsd available and assume the same for s{y,xx,yy,xy}fsd)
+               id_nfsd = 0
+               DO jk = 1, 99
+                  WRITE(zchar1,'(I2.2)') jk
+                  znam = 'sxfsd'//'_l'//zchar1
+                  IF( iom_varid( numrir, znam, ldstop = .FALSE. ) > 0 )   id_nfsd = id_nfsd + 1
+               ENDDO
+               IF( id_nfsd == nn_nfsd ) THEN
+                  DO jk = 1, nn_nfsd
+                     WRITE(zchar1,'(I2.2)') jk
+                     znam = 'sxfsd'//'_l'//zchar1
+                     CALL iom_get( numrir, jpdom_auto, znam , z3d, psgn = -1._wp )   ;   sxfsd (:,:,jk,:) = z3d(:,:,:)
+                     znam = 'syfsd'//'_l'//zchar1
+                     CALL iom_get( numrir, jpdom_auto, znam , z3d, psgn = -1._wp )   ;   syfsd (:,:,jk,:) = z3d(:,:,:)
+                     znam = 'sxxfsd'//'_l'//zchar1
+                     CALL iom_get( numrir, jpdom_auto, znam , z3d )                  ;   sxxfsd(:,:,jk,:) = z3d(:,:,:)
+                     znam = 'syyfsd'//'_l'//zchar1
+                     CALL iom_get( numrir, jpdom_auto, znam , z3d )                  ;   syyfsd(:,:,jk,:) = z3d(:,:,:)
+                     znam = 'sxyfsd'//'_l'//zchar1
+                     CALL iom_get( numrir, jpdom_auto, znam , z3d )                  ;   sxyfsd(:,:,jk,:) = z3d(:,:,:)
+                  END DO
+               ELSE
+                  IF( id_nfsd == 0 ) THEN
+                     IF(lwp) WRITE(numout,*) '   ==>>   previous run without floe size distribution output'
+                     IF(lwp) WRITE(numout,*) '          we set FSD advection moments to 0'
+                  ELSE  ! id_nfsd /= nn_nfsd
+                     CALL ctl_warn( 'adv_pra_rst ===>>> : inconsistent number of floe size categories in restart',  &
+                        &           'we bypass reading of FSD advection moments, setting them to zero')
+                  ENDIF
+                  !
+                  sxfsd = 0._wp ; syfsd = 0._wp ; sxxfsd = 0._wp ; syyfsd = 0._wp ; sxyfsd = 0._wp
+               ENDIF
+            ENDIF
+            !
          ELSE                                   !**  start advection from rest  **!
             !
             IF(lwp) WRITE(numout,*) '   ==>>   start from rest OR previous run without Prather, set moments to 0'
@@ -1595,6 +1633,26 @@ CONTAINS
             CALL iom_rstput( iter, nitrst, numriw, 'sxxvl', sxxvl )
             CALL iom_rstput( iter, nitrst, numriw, 'syyvl', syyvl )
             CALL iom_rstput( iter, nitrst, numriw, 'sxyvl', sxyvl )
+            !
+         ENDIF
+         !
+         IF( ln_fsd ) THEN
+            !                                                        ! floe size distribution
+            !
+            ! treat floe size categories as 'layers' (analogous to, e.g., heat content variables)
+            DO jk = 1, nn_nfsd
+               WRITE(zchar1,'(I2.2)') jk
+               znam = 'sxfsd'//'_l'//zchar1   ;   z3d(:,:,:) = sxfsd (:,:,jk,:)
+               CALL iom_rstput( iter, nitrst, numriw, znam , z3d )
+               znam = 'syfsd'//'_l'//zchar1   ;   z3d(:,:,:) = syfsd (:,:,jk,:)
+               CALL iom_rstput( iter, nitrst, numriw, znam , z3d )
+               znam = 'sxxfsd'//'_l'//zchar1  ;   z3d(:,:,:) = sxxfsd(:,:,jk,:)
+               CALL iom_rstput( iter, nitrst, numriw, znam , z3d )
+               znam = 'syyfsd'//'_l'//zchar1  ;   z3d(:,:,:) = syyfsd(:,:,jk,:)
+               CALL iom_rstput( iter, nitrst, numriw, znam , z3d )
+               znam = 'sxyfsd'//'_l'//zchar1  ;   z3d(:,:,:) = sxyfsd(:,:,jk,:)
+               CALL iom_rstput( iter, nitrst, numriw, znam , z3d )
+            END DO
             !
          ENDIF
          !

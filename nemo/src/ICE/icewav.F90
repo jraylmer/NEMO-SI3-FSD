@@ -92,10 +92,10 @@ MODULE icewav
    INTEGER         ::   nn_frac_scheme    !: Selection of wave-ice fracture scheme
    REAL(wp)        ::   rn_y24a_cw        !: Parameter in Y24A fracture scheme
    REAL(wp)        ::   rn_y24a_alpha     !: Parameter in Y24A fracture scheme
-   INTEGER         ::   nn_ht15_nx1d      !: Size of 1D subdomain for wave fracture calculation
-   REAL(wp)        ::   rn_ht15_dx1d      !: Increment of 1D subdomain for wave fracture calculation (meters)
-   INTEGER         ::   nn_ht15_rmin      !: Radius of smallest floes affected by wave fracture in units of rn_ice_wav_dx1d
-   LOGICAL         ::   ln_ht15_rand      !: Use random phases for sea surface height in wave fracture calculation
+   INTEGER         ::   nn_ht15_nx1d      !: Size of 1D subdomain for wave fracture calculation (HT15 only)
+   REAL(wp)        ::   rn_ht15_dx1d      !: Increment of 1D subdomain for wave fracture calculation (m; HT15 only)
+   INTEGER         ::   nn_ht15_rmin      !: Radius of smallest floes affected by wave fracture in units of rn_ht15_dx1d
+   LOGICAL         ::   ln_ht15_rand      !: Use random phases for SSH in HT15 wave fracture calculation
    !
    ! Note: other namwav parameters declared in par_ice as they are needed by module
    ! ----- sbcwave which cannot access this module (would create circular dependency)
@@ -636,8 +636,7 @@ CONTAINS
       !!
       !!                     This general formulation from Zhang et al. (2015) allows different wave
       !!                     fracture schemes to be used via different choices of Q(r) and B(s,r).
-      !!                     Currently, only the scheme of Horvat and Tziperman (2015) is implemented
-      !!                     for which the two source terms are calculated in subroutine wav_frac_ht15.
+      !!                     These are done by the local subroutines wav_frac_*
       !!
       !!                     In the discretised implementation, f(r) is replaced by L(r) which
       !!                     corresponds to model variables a_ifsd(ji,jj,jf,jl) / floe_dr(jf), while
@@ -653,7 +652,7 @@ CONTAINS
       !!                     is (possibly) required, calculated in function rDt_ice_fsd() in module icefsd.
       !!
       !! ** Callers :   ice_stp -> [ice_wav_frac]
-      !! ** Calls   :              [ice_wav_frac] -> wav_frac_ht15
+      !! ** Calls   :              [ice_wav_frac] -> wav_frac_{y24a,y24b,ht15}
       !! ** Invokes :              [ice_wav_frac] -> wav_spec_bret()   (ln_ice_wav_spec = F AND ln_ice_wav_attn = F)
       !!                           [ice_wav_frac] -> rDt_ice_fsd()
       !!
@@ -738,6 +737,9 @@ CONTAINS
                   ! (note: other schemes are much cheaper so similar checks not needed):
                   IF( MAXVAL( wspec(ji,jj,:) ) > epsi06 ) THEN
                      CALL wav_frac_ht15( wspec(ji,jj,:), zh_i, zQfrac(:), zBfrac(:,:) )
+                  ELSE
+                     zQfrac(:)   = 0._wp
+                     zBfrac(:,:) = 0._wp
                   ENDIF
                   !
                CASE DEFAULT
@@ -908,8 +910,6 @@ CONTAINS
       !
       INTEGER             ::   jf                ! dummy loop indices
       REAL(wp)            ::   zstrain           ! ice strain due to waves
-      REAL(wp), PARAMETER ::   zalpha = 1.0_wp   ! exponent factor in Q(r)
-      REAL(wp), PARAMETER ::   zcw    = 0.8_wp   ! scaling term for Q(r)
       !
       !!-------------------------------------------------------------------
 

@@ -28,7 +28,7 @@ MODULE icethd
    USE icethd_do      ! sea-ice: growth in open water
    USE icethd_pnd     ! sea-ice: melt ponds
    USE iceitd  , ONLY : ice_itd_rem
-   USE icefsd  , ONLY : a_ifsd
+   USE icefsd  , ONLY : a_ifsd, ice_fsd_dia
    USE icecor         ! sea-ice: corrections
    USE icectl         ! sea-ice: control print
    !
@@ -90,6 +90,9 @@ CONTAINS
       !
       REAL(wp), DIMENSION(A2D(0)) ::   zevap_rema   ! remaining of evaporation after snow sublimation (in kg/m2)
       !
+      REAL(wp), DIMENSION(A2D(0),nn_nfsd,jpl) ::   za_ifsdb_da   ! FSD before lateral melt for FSD diagnostics
+      REAL(wp), DIMENSION(A2D(0),jpl)         ::   za_ib_da      ! a_i before lateral melt for FSD diagnostics
+      !
       INTEGER ::   ji, jj, jk, jl   ! dummy loop indices
       !!-------------------------------------------------------------------
 
@@ -119,6 +122,9 @@ CONTAINS
       !-------------------------------------------------------------------------------------------!
       !
       CALL ice_thd_frazil             !--- frazil ice: collection thickness (ht_i_new) & fraction of frazil (fraz_frac)
+      !
+      ! Save a_ifsd before lateral melt (ice_thd_da; only thing affecting this variable in jl loop below):
+      IF( ln_fsd )   za_ifsdb_da(A2D(0),:,:) = a_ifsd(A2D(0),:,:)
       !
       DO jl = 1, jpl
 
@@ -160,12 +166,12 @@ CONTAINS
             !
                               CALL ice_thd_temp( jl )                                    ! --- Ice Temperature update --- !
             !
+            IF( ln_fsd )      za_ib_da(A2D(0),jl) = a_i(A2D(0),jl)                       ! --- Save a_i before lateral melt for FSD diagnostics --- !
+            !
             IF( ln_icedH .AND. ln_virtual_itd ) &
                &              CALL ice_thd_mono( jl )                                    ! --- Extra lateral melting if virtual_itd --- !
             !
-            !
             IF( ln_icedA )    CALL ice_thd_da  ( jl )                                    ! --- Ice Lateral melting --- !
-            !
             !
                               CALL ice_thd_unit_convert( jl, 2 )            ! --- Change units of e_i, e_s from J/m3 to J/m2 --- !
             !
@@ -173,6 +179,14 @@ CONTAINS
          !
          !
       END DO ! jl loop 
+      !
+      ! Floe size distribution: tendency diagnostics
+      !
+      ! NOTE: if anything is added after ice_thd_da in loop above (or order changed)
+      ! ----- will need to save a_i after lateral melt as well. Currently it is not needed;
+      !       we can just use a_i because it is the most recent process.
+      !
+      IF( ln_fsd )         CALL ice_fsd_dia( 'lam', za_ifsdb_da, a_ifsd(A2D(0),:,:), za_ib_da, a_i(A2D(0),:) )
       !
       IF( ln_icediachk )   CALL ice_cons_hsm(1, 'icethd', rdiag_v, rdiag_s, rdiag_t, rdiag_fv, rdiag_fs, rdiag_ft)
       IF( ln_icediachk )   CALL ice_cons2D  (1, 'icethd',  diag_v,  diag_s,  diag_t,  diag_fv,  diag_fs,  diag_ft)

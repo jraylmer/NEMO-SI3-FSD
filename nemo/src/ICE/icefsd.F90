@@ -23,10 +23,11 @@ MODULE icefsd
    IMPLICIT NONE
    PRIVATE
 
-   PUBLIC ::   ice_fsd_init               ! routine called by ice_stp
+   PUBLIC ::   ice_fsd_init               ! routine called by ice_init
    PUBLIC ::   ice_fsd_istate             ! routine called by ice_istate, ice_rst_read
    PUBLIC ::   ice_fsd_wri                ! routine called by ice_stp
-   PUBLIC ::   ice_fsd_restoring          ! routine called by ice_stp
+   PUBLIC ::   ice_fsd_dia                ! routine called by various routines
+   PUBLIC ::   ice_fsd_brit               ! routine called by ice_dyn
    PUBLIC ::   fsd_cleanup                ! routine called by ice_wav_frac [TODO: sort out names/distinction of this and ice_fsd_cleanup]
    PUBLIC ::   ice_fsd_cleanup            ! routine called by ice_dyn_adv_pra
    PUBLIC ::   ice_fsd_partition_newice   ! routine called by ice_thd_do
@@ -48,6 +49,9 @@ MODULE icefsd
    INTEGER , PUBLIC                              :: nf_newice    !: index of FSD cat. for new ice in absence of waves (m)
 
    REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:,:,:) ::   a_ifsd      !: FSD per ice thickness category
+   REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:,:,:) ::   a_ifsd_b    !: FSD at "before" time step (see icestp)
+   REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:,:,:) ::   a_ifsd_b0   !: FSD truly at before time step
+   REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:,:)   ::   a_i_b0      !: a_i truly at before time step
 
    ! ** namelist (namfsd) **
    INTEGER  ::   nn_fsd_ini         ! FSD init. options (1 = all in largest FSD cat; 2 = imposed power law)
@@ -63,14 +67,11 @@ MODULE icefsd
 
 CONTAINS
 
-
-   SUBROUTINE ice_fsd_restoring
+   SUBROUTINE ice_fsd_brit
       !!-------------------------------------------------------------------
-      !!                 ***  ROUTINE ice_fsd_restoring  ***
+      !!                 ***  ROUTINE ice_fsd_brit  ***
       !!
-      !! ** Purpose :   Apply restoring to the FSD, shifting floes from larger
-      !!                to smaller floe size categories with specified restoring
-      !!                timescale.
+      !! ** Purpose :   In-plane (brittle) fracture of sea ice.
       !!
       !! ** Method  :   Wherever the FSD f(r) satisfies:
       !!
@@ -93,12 +94,15 @@ CONTAINS
       !!              The Cryosphere, 16, 2565-2593.
       !!-------------------------------------------------------------------
       !
-      REAL(wp), PARAMETER ::   zlogfsd_grad_target = 0._wp   ! log(FSD) gradient to restore toward
+      REAL(wp), PARAMETER ::   zlogfsd_grad_target = 0._wp            ! log(FSD) gradient to restore toward
       !
-      REAL(wp) ::   zlogfsd_grad     ! FSD forward-in-space gradient in log space
-      INTEGER  ::   ji, jj, jl, jf   ! dummy loop indices
+      REAL(wp), DIMENSION(A2D(0),nn_nfsd,jpl) ::   zfstd_b           ! FSTD before restoring (for tendency diagnostic)
+      REAL(wp)                                ::   zlogfsd_grad      ! FSD forward-in-space gradient in log space
+      INTEGER                                 ::   ji, jj, jl, jf    ! dummy loop indices
       !
       !!-------------------------------------------------------------------
+
+      zfstd_b(A2D(0),:,:) = a_ifsd(A2D(0),:,:)   ! FSTD before restoring (for diagnostic)
 
       DO jl = 1, jpl
          DO_2D( 0, 0, 0, 0 )
@@ -131,7 +135,10 @@ CONTAINS
          END_2D
       ENDDO
 
-   END SUBROUTINE ice_fsd_restoring
+      ! Write FSD tendency diagnostics due to brittle fracture:
+      CALL ice_fsd_dia( 'bfr', zfstd_b, a_ifsd(A2D(0),:,:), a_i(A2D(0),:), a_i(A2D(0),:) )
+
+   END SUBROUTINE ice_fsd_brit
 
 
    SUBROUTINE ice_fsd_partition_newice( pa_i, pv_i, pa_ifstd, pv_newice, pv_latgro, pda_latgro )
@@ -867,7 +874,7 @@ CONTAINS
          DO jf = 1, nn_nfsd
             zfsd (ji,jj,jf) = SUM( a_ifsd(ji,jj,jf,:) * a_i(ji,jj,:) )
             zpdd (ji,jj,jf) =      (2._wp / floe_rc(jf)) * zfsd(ji,jj,jf) * zmsk1_ati(ji,jj)
-            zravg(ji,jj)    = zravg(ji,jj) + floe_rc(jf) * zfsd(ji,jj,jf) * zmsk1_ati(ji,jj)
+            zravg(ji,jj)    = zravg(ji,jj) + floe_rc(jf) * zfsd(ji,jj,jf)
          ENDDO
          !
          ! Perimeter density and effective floe size, per ITD category:
@@ -903,6 +910,94 @@ CONTAINS
       IF(iom_use( 'icefsdravg'     )) CALL iom_put( 'icefsdravg'     , zravg    (A2D(0))     * zmsk00   )
 
    END SUBROUTINE ice_fsd_wri
+
+
+   SUBROUTINE ice_fsd_dia( cd_dia, pa_ifsdb, pa_ifsda, pa_ib, pa_ia )
+      !!-------------------------------------------------------------------
+      !!                 ***    ROUTINE ice_fsd_dia    ***
+      !!
+      !! ** Purpose :   Calculate and write FSD tendency diagnostics
+      !!
+      !! ** Method  :   The change in floe size-thickness distribution, FSTD = a_ifsd*a_i,
+      !!                is calculated as (FSTD_a - FSTD_b) / rDt_ice, where '_a' and '_b' refer to
+      !!                after and before the process of which the tendency is computed. This is done
+      !!                similarly for other FSD-related diagnostics such as mean floe radius.
+      !!                Diagnostics are sent to IOM as required.
+      !!
+      !! ** Inputs  :   Length-3 character name of process for diagnostic suffix (e.g., 'lam' for lateral melt)
+      !!                Prognostic FSTD and ice concentration (cat.) variables before and after process,
+      !!                each on the inner domain only [i.e., send a_ifsd(A2D(0),:,:)].
+      !!
+      !!-------------------------------------------------------------------
+      !
+      CHARACTER(len=3)                          , INTENT(in) ::   cd_dia     ! process label (lam, lag, etc.)
+      REAL(wp)   , DIMENSION(A2D(0),nn_nfsd,jpl), INTENT(in) ::   pa_ifsdb   ! FSTD before process (inner domain)
+      REAL(wp)   , DIMENSION(A2D(0),nn_nfsd,jpl), INTENT(in) ::   pa_ifsda   ! FSTD after process (inner domain)
+      REAL(wp)   , DIMENSION(A2D(0),jpl)        , INTENT(in) ::   pa_ib      ! a_i before process (inner domain)
+      REAL(wp)   , DIMENSION(A2D(0),jpl)        , INTENT(in) ::   pa_ia      ! a_i after process (inner domain)
+      !
+      CHARACTER(len=25) ::   cl_ref   ! output field reference (whole name including suffix)
+      CHARACTER(len=4)  ::   cl_sfx   ! output field reference (suffix)
+      !
+      REAL(wp), DIMENSION(A2D(0),nn_nfsd,jpl) ::   zmsk00fc     ! Ice present mask (2D + FSD and ITD dimensions)
+      REAL(wp), DIMENSION(A2D(0),nn_nfsd)     ::   zmsk00f      ! Ice present mask (2D + FSD dimension)
+      REAL(wp), DIMENSION(A2D(0))             ::   zmsk00       ! Ice present mask (2D)
+      REAL(wp), DIMENSION(A2D(0),nn_nfsd,jpl) ::   zdfstd       ! Tendency of FSTD
+      REAL(wp), DIMENSION(A2D(0),nn_nfsd)     ::   zdfsd        ! Tendency of FSD (FSTD integrated over ITD)
+      REAL(wp), DIMENSION(A2D(0))             ::   zdravg       ! Tendency of mean floe radius
+      REAL(wp), DIMENSION(A2D(0))             ::   zat_ia       ! Total ice concentration (after process)
+      INTEGER                                 ::   ji, jj, jf   ! dummy loop indices
+      !
+      !!-------------------------------------------------------------------
+
+      zat_ia(:,:) = SUM( pa_ia(:,:,:), DIM=3 )   ! total ice conc. after
+
+      ! --- Calculate sea ice threshold masks for outputs (as in subroutine ice_wri)
+      zmsk00 (:,:)   = MERGE( 1._wp, 0._wp, zat_ia(:,:)  >= epsi06 )
+
+      ! --- Analogous masks including FSD dimension
+      DO jf = 1, nn_nfsd
+         zmsk00f (:,:,jf)   = MERGE( 1._wp, 0._wp, zat_ia(:,:)  >= epsi06 )
+         zmsk00fc(:,:,jf,:) = MERGE( 1._wp, 0._wp, pa_ia(:,:,:) >= epsi06 )
+      ENDDO
+
+      ! Calculate tendency diagnostics:
+      !
+      zdravg(:,:) = 0._wp  ! initialise
+      !
+      DO_2D(0, 0, 0, 0)
+         !
+         zdfstd(ji,jj,:,:) = r1_Dt_ice * ( pa_ifsda(ji,jj,:,:) - pa_ifsdb(ji,jj,:,:) )
+         !
+         DO jf = 1, nn_nfsd
+            zdfsd(ji,jj,jf) = r1_Dt_ice * (  SUM(pa_ifsda(ji,jj,jf,:) * pa_ia(ji,jj,:))   &
+               &                           - SUM(pa_ifsdb(ji,jj,jf,:) * pa_ib(ji,jj,:))   )
+            !
+            ! mean floe radius from integrating FSD, above, which already has 1/dt factor:
+            zdravg(ji,jj) = zdravg(ji,jj) + floe_rc(jf) * zdfsd(ji,jj,jf)
+         ENDDO
+         !
+      END_2D
+
+      ! Determine suffix for field references. If it is total (tendency across whole time step
+      ! i.e. all processes) then we do not add a suffix, otherwise it is the 3-char. input:
+      IF( TRIM(cd_dia) == 'tot' ) THEN
+         cl_sfx = ''
+      ELSE
+         cl_sfx = '_'//TRIM(cd_dia)
+      ENDIF
+
+      ! Write diagnostics:
+      cl_ref = 'icefsd_cat_tend'//TRIM(cl_sfx)
+      IF( iom_use( cl_ref ) )   CALL iom_put( cl_ref, zdfstd * zmsk00fc )
+
+      cl_ref = 'icefsd_tend'//TRIM(cl_sfx)
+      IF( iom_use( cl_ref ) )   CALL iom_put( cl_ref, zdfsd  * zmsk00f  )
+
+      cl_ref = 'icefsdravg_tend'//TRIM(cl_sfx)
+      IF( iom_use( cl_ref ) )   CALL iom_put( cl_ref, zdravg * zmsk00   )
+
+   END SUBROUTINE ice_fsd_dia
 
 
    SUBROUTINE fsd_cleanup(pa_ifsd_jl)
@@ -1263,8 +1358,11 @@ CONTAINS
 
       IF(ln_fsd) THEN
 
-         ALLOCATE(a_ifsd(jpi,jpj,nn_nfsd,jpl), STAT=ierr)
-         IF (ierr /= 0)   CALL ctl_stop('ice_fsd_init: could not allocate FSD array (a_ifsd)')
+         ALLOCATE(a_ifsd   (jpi,jpj,nn_nfsd,jpl), a_ifsd_b(jpi,jpj,nn_nfsd,jpl),   &
+            &     a_ifsd_b0(jpi,jpj,nn_nfsd,jpl), a_i_b0  (jpi,jpj,jpl),           &
+            &     STAT=ierr                                                        )
+
+         IF( ierr /= 0 )   CALL ctl_stop('ice_fsd_init: could not allocate arrays')
 
          CALL fsd_initbounds
 

@@ -135,6 +135,17 @@ CONTAINS
          CALL eos_fzp( sss_m(:,:), t_bo(:,:), kbnd=0 )                    ! freezing temperature [Kelvin] (set to rt0 over land)
          t_bo(:,:) = ( t_bo(:,:) + rt0 ) * smask0(:,:) + rt0 * ( 1._wp - smask0(:,:) )
          !
+         IF( ln_fsd ) THEN
+            ! For FSD diagnostics need to save FSD and ice conc. at before time step.
+            ! This differs from a_i_b and a_ifsd_b which are are updated between dyn and thd
+            ! in routine store_fields (i.e., they are only really at 'before time step' before thd).
+            ! For want of better names, I have defined a_i_b0 and a_ifsd_b0 as the values 'truly before',
+            ! i.e., at the start of the time step. See usage in diag_trends (sent to ice_fsd_dia to write
+            ! FSD total tendency variables).
+            a_i_b0   (:,:,:)   = a_i   (:,:,:)
+            a_ifsd_b0(:,:,:,:) = a_ifsd(:,:,:,:)
+         ENDIF
+         !
 #if defined key_agrif
          !-------------------------------!
          ! --- AGRIF Parent to Child --- !
@@ -157,6 +168,11 @@ CONTAINS
                                         CALL ice_sbc_tau( kt, ksbc, utau_ice, vtau_ice )
          !
          !-------------------------------------!
+         ! --- Attenuation of ocean waves  --- !
+         !-------------------------------------!
+         IF( ln_ice_wav_attn )          CALL ice_wav_attn( kt )       ! Attenuation of waves by ice
+         !
+         !-------------------------------------!
          ! --- Ice dynamics and advection  --- !
          !-------------------------------------!
                                         CALL diag_set0                ! set diag of mass, heat and salt fluxes to 0
@@ -165,13 +181,8 @@ CONTAINS
          IF( ln_icedyn .AND. .NOT.ln_c1d )   &
             &                           CALL ice_dyn( kt, Kmm )       ! -- Ice dynamics
          ! ==> clem: here, all the global variables are correctly defined in the halos if no thermo or if bdy
-         !         
+         !
                                         CALL diag_trends( 1 )         ! record dyn trends
-         !
-         IF( ln_ice_wav_attn )          CALL ice_wav_attn( kt )       ! Attenuation of waves by ice
-         IF( ln_ice_wav )               CALL ice_wav_frac( kt )       ! Ice fracture by ocean waves
-         !
-         IF( ln_fsd )                   CALL ice_fsd_restoring        ! Floe size distribution
          !
          !-----------------------------!
          ! --- Thermodynamics BDY  --- !
@@ -421,6 +432,9 @@ CONTAINS
             e_s_b  (ji,jj,:,jl) = e_s  (ji,jj,:,jl)   ! snow thermal energy
             e_i_b  (ji,jj,:,jl) = e_i  (ji,jj,:,jl)   ! ice thermal energy
             szv_i_b(ji,jj,:,jl) = szv_i(ji,jj,:,jl)   ! ice salt content
+            !
+            IF( ln_fsd ) a_ifsd_b(ji,jj,:,jl) = a_ifsd(ji,jj,:,jl)   ! floe size distribution
+            !
          END_2D
       ENDDO
       ! total concentration
@@ -562,6 +576,20 @@ CONTAINS
          IF( kn == 2 )   CALL iom_put( 'afxthd' , SUM( a_i(A2D(0),:) - a_i_b(:,:,:), dim=3 ) * r1_Dt_ice ) ! thermo trend
          IF( kn == 2 )   CALL iom_put( 'afxtot' , diag_aice )                                              ! total trend
          !
+      ENDIF
+      !
+      ! --- trends of floe size distribution variables
+      IF( ln_fsd ) THEN
+         IF( kn == 1 )   CALL ice_fsd_dia( 'dyn', a_ifsd_b(A2D(0),:,:) , a_ifsd(A2D(0),:,:),   &
+            &                                     a_i_b   (A2D(0),:)   , a_i   (A2D(0),:)      )   ! FSD dyn trends
+         !
+         IF( kn == 2 ) THEN
+                         CALL ice_fsd_dia( 'thd', a_ifsd_b(A2D(0),:,:) , a_ifsd(A2D(0),:,:),   &
+            &                                     a_i_b   (A2D(0),:)   , a_i   (A2D(0),:)      )   ! FSD thd trends
+         !
+                         CALL ice_fsd_dia( 'tot', a_ifsd_b0(A2D(0),:,:), a_ifsd(A2D(0),:,:),   &
+            &                                     a_i_b0   (A2D(0),:)  , a_i   (A2D(0),:)      )   ! FSD tot trends
+         ENDIF
       ENDIF
       !
    END SUBROUTINE diag_trends

@@ -19,7 +19,7 @@ MODULE icedyn_adv
    USE icedyn_adv_pra ! sea-ice: advection scheme (Prather)
    USE icedyn_adv_umx ! sea-ice: advection scheme (ultimate-macho)
    USE icectl         ! sea-ice: control prints
-   USE icefsd  , ONLY : a_ifsd   ! sea-ice: floe size distribution
+   USE icefsd  , ONLY : a_ifsd, ice_fsd_dia   ! sea-ice: floe size distribution
    !
    USE in_out_manager ! I/O manager
    USE iom            ! I/O manager library
@@ -64,6 +64,11 @@ CONTAINS
       !! ** action :
       !!----------------------------------------------------------------------
       INTEGER, INTENT(in) ::   kt   ! number of iteration
+      !
+      ! Floe size distribution: local variables for tendency diagnostics:
+      REAL(wp), DIMENSION(A2D(0),nn_nfsd,jpl) ::   za_ifsdb   ! floe size distribution before advection
+      REAL(wp), DIMENSION(A2D(0),jpl)         ::   za_ib      ! sea ice concentration before advection
+      !
       !!---------------------------------------------------------------------
       !
       ! controls
@@ -74,6 +79,12 @@ CONTAINS
          WRITE(numout,*)
          WRITE(numout,*) 'ice_dyn_adv: sea-ice advection'
          WRITE(numout,*) '~~~~~~~~~~~'
+      ENDIF
+      !
+      ! Floe size distribution: save before values for diagnostics:
+      IF( ln_fsd ) THEN
+         za_ib(A2D(0),:)      = a_i(A2D(0),:)
+         za_ifsdb(A2D(0),:,:) = a_ifsd(A2D(0),:,:)
       ENDIF
       !
       !---------------!
@@ -110,6 +121,9 @@ CONTAINS
       IF( iom_use('salmtrp') )   CALL iom_put( 'salmtrp' ,  diag_trp_sv * rhoi * 1.e-03 )   ! salt mass transport (kg/m2/s)
       IF( iom_use('dihctrp') )   CALL iom_put( 'dihctrp' , -diag_trp_ei                 )   ! advected ice heat content (W/m2)
       IF( iom_use('dshctrp') )   CALL iom_put( 'dshctrp' , -diag_trp_es                 )   ! advected snw heat content (W/m2)
+
+      ! Floe size distribution diagnostics: tendencies due to advection:
+      IF( ln_fsd )   CALL ice_fsd_dia( 'adv', za_ifsdb, a_ifsd(A2D(0),:,:), za_ib, a_i(A2D(0),:) )
 
       ! controls
       IF( ln_icediachk )   CALL ice_cons_hsm(1, 'icedyn_adv', rdiag_v, rdiag_s, rdiag_t, rdiag_fv, rdiag_fs, rdiag_ft) ! conservation

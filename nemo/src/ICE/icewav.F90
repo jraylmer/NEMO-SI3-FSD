@@ -32,7 +32,7 @@ MODULE icewav
    USE sbcwave, ONLY :   hsw, wpf, wmp, wfreq, wdfreq, wspec     ! SBC: wave variables
    USE ice               ! sea-ice: variables
    USE icefsd , ONLY :   a_ifsd, nf_newice, floe_rl, floe_rc, floe_ru, floe_dr   ! floe size distribution parameters/variables
-   USE icefsd , ONLY :   rDt_ice_fsd, fsd_cleanup                                ! floe size distribution functions/routines
+   USE icefsd , ONLY :   rDt_ice_fsd, fsd_cleanup, ice_fsd_dia                   ! floe size distribution functions/routines
 
    USE in_out_manager    ! I/O manager (needed for lwm and lwp logicals)
    USE iom               ! I/O manager library (needed for iom_put)
@@ -670,20 +670,22 @@ CONTAINS
       !!
       !!-------------------------------------------------------------------
       !
-      INTEGER , INTENT(in)                 ::   kt                   ! ocean time step
+      INTEGER , INTENT(in)                    ::   kt                   ! ocean time step
       !
-      REAL(wp), DIMENSION(nn_nfsd,nn_nfsd) ::   zBfrac               ! fracture redistribution function B(s,r)dr
-      REAL(wp), DIMENSION(nn_nfsd)         ::   zQfrac               ! fracture probability function (s-1)
-      REAL(wp), DIMENSION(nn_nfsd)         ::   za_ifsd_tend         ! tendency of FSD due to wave fracture
-      REAL(wp)                             ::   zh_i                 ! mean ice thickness
-      REAL(wp)                             ::   zfsd_res             ! correction term for area conservation
-      REAL(wp)                             ::   zdt_sub              ! adaptive time step (s)
-      REAL(wp)                             ::   ztelapsed            ! to track time elapsed during adaptive time stepping (s)
-      INTEGER                              ::   isubt                ! to track number of adaptive time steps
-      INTEGER                              ::   ji, jj, jl, jf       ! dummy loop indices
+      REAL(wp), DIMENSION(A2D(0),nn_nfsd,jpl) ::   za_ifsdb             ! a_ifsd before fracture (for diagnostics)
       !
-      REAL(wp), PARAMETER                  ::   zat_i_min = .01_wp   ! minimum concentration for fracture to occur
-      INTEGER , PARAMETER                  ::   isubt_max = 100      ! maximum number of adaptive time steps before warning
+      REAL(wp), DIMENSION(nn_nfsd,nn_nfsd)    ::   zBfrac               ! fracture redistribution function B(s,r)dr
+      REAL(wp), DIMENSION(nn_nfsd)            ::   zQfrac               ! fracture probability function (s-1)
+      REAL(wp), DIMENSION(nn_nfsd)            ::   za_ifsd_tend         ! tendency of FSD due to wave fracture
+      REAL(wp)                                ::   zh_i                 ! mean ice thickness
+      REAL(wp)                                ::   zfsd_res             ! correction term for area conservation
+      REAL(wp)                                ::   zdt_sub              ! adaptive time step (s)
+      REAL(wp)                                ::   ztelapsed            ! to track time elapsed during adaptive time stepping (s)
+      INTEGER                                 ::   isubt                ! to track number of adaptive time steps
+      INTEGER                                 ::   ji, jj, jl, jf       ! dummy loop indices
+      !
+      REAL(wp), PARAMETER                     ::   zat_i_min = .01_wp   ! minimum concentration for fracture to occur
+      INTEGER , PARAMETER                     ::   isubt_max = 100      ! maximum number of adaptive time steps before warning
       !
       !!-------------------------------------------------------------------
 
@@ -701,6 +703,8 @@ CONTAINS
          wlam(:)  = grav / (2._wp * rpi * wfreq(:)**2)
          wknum(:) = 2._wp * rpi / wlam(:)
       ENDIF
+
+      za_ifsdb(A2D(0),:,:) = a_ifsd(A2D(0),:,:)   ! save a_ifsd before fracture for tendency diagnostics
 
       !-----------------!
       ! Begin main loop !
@@ -840,7 +844,8 @@ CONTAINS
          ENDIF ! -------- at_i(ji,jj) > zat_i_min
       END_2D ! ---------- main loop
 
-      CALL lbc_lnk( 'icewav', a_ifsd, 'T', 1._wp )
+      ! Write FSD tendency diagnostics due to wave fractue:
+      CALL ice_fsd_dia( 'wav', za_ifsdb, a_ifsd(A2D(0),:,:), a_i(A2D(0),:), a_i(A2D(0),:) )
 
       ! Control:
       IF( ln_timing )   CALL timing_stop('ice_wav_frac')

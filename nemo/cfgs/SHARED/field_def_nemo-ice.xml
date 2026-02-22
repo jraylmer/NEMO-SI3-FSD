@@ -56,9 +56,19 @@
       <field id="dvpn_drn"     long_name="pond volume tendency due to drainage"                    standard_name="sea_ice_pondvolume_tendency_drainage"      unit="kg/m2/s" />
 
       <!-- FSD -->
-      <field id="icefsdperi"     long_name="Sea ice perimeter density (area-weighted mean over categories)"                                                  unit="m-1" />
-      <field id="icefsdleff"     long_name="Sea ice effective floe size (area-weighted mean over categories)"                                                unit="m"   />
-      <field id="icefsdravg"     long_name="Sea ice mean floe radius (area-weighted mean over categories)"                                                   unit="m"   />
+      <field id="icefsdperi"            long_name="Sea ice perimeter density (area-weighted mean over categories)"                                           unit="m-1" />
+      <field id="icefsdleff"            long_name="Sea ice effective floe size (area-weighted mean over categories)"                                         unit="m"   />
+      <field id="icefsdravg"            long_name="Sea ice mean floe radius (area-weighted mean over categories)"                                            unit="m"   />
+      <field id="icefsdravg_tend"       long_name="Sea ice mean floe radius tendency"                                                                        unit="m/s" />
+      <field id="icefsdravg_tend_dyn"   long_name="Sea ice mean floe radius tendency due to dynamics"                                                        unit="m/s" />
+      <field id="icefsdravg_tend_thd"   long_name="Sea ice mean floe radius tendency due to thermodynamics"                                                  unit="m/s" />
+      <field id="icefsdravg_tend_adv"   long_name="Sea ice mean floe radius tendency due to advection"                                                       unit="m/s" />
+      <field id="icefsdravg_tend_lam"   long_name="Sea ice mean floe radius tendency due to lateral melt"                                                    unit="m/s" />
+      <field id="icefsdravg_tend_lag"   long_name="Sea ice mean floe radius tendency due to lateral growth"                                                  unit="m/s" />
+      <field id="icefsdravg_tend_opw"   long_name="Sea ice mean floe radius tendency due to growth in open water"                                            unit="m/s" />
+      <field id="icefsdravg_tend_wel"   long_name="Sea ice mean floe radius tendency due to welding"                                                         unit="m/s" />
+      <field id="icefsdravg_tend_bfr"   long_name="Sea ice mean floe radius tendency due to brittle fracture"                                                unit="m/s" />
+      <field id="icefsdravg_tend_wav"   long_name="Sea ice mean floe radius tendency due to wave fracture"                                                   unit="m/s" />
 
       <!-- heat -->
       <field id="icetemp"      long_name="Mean ice temperature"                                                                                              unit="degC" detect_missing_value="true" />
@@ -381,15 +391,35 @@ standard_name="rft_loss"                                 unit="1/s"  />
     <!-- FSD categories -->
     <field_group id="FSD_3D" grid_ref="grid_T_fsd_inner" >
 
-      <field id="icefsd"          long_name="Sea ice floe size distribution"                           unit="1" />
-      <field id="icepdd"          long_name="Sea ice perimeter density distribution"                   unit="m-1" />
+      <field id="icefsd"          long_name="Sea ice floe size distribution"                                      unit="1" />
+      <field id="icefsd_tend"     long_name="Sea ice floe size distribution tendency"                             unit="1/s" />
+      <field id="icefsd_tend_dyn" long_name="Sea ice floe size distribution tendency due to dynamics"             unit="1/s" />
+      <field id="icefsd_tend_thd" long_name="Sea ice floe size distribution tendency due to thermodynamics"       unit="1/s" />
+      <field id="icefsd_tend_adv" long_name="Sea ice floe size distribution tendency due to advection"            unit="1/s" />
+      <field id="icefsd_tend_lam" long_name="Sea ice floe size distribution tendency due to lateral melt"         unit="1/s" />
+      <field id="icefsd_tend_lag" long_name="Sea ice floe size distribution tendency due to lateral growth"       unit="1/s" />
+      <field id="icefsd_tend_opw" long_name="Sea ice floe size distribution tendency due to growth in open water" unit="1/s" />
+      <field id="icefsd_tend_wel" long_name="Sea ice floe size distribution tendency due to welding"              unit="1/s" />
+      <field id="icefsd_tend_bfr" long_name="Sea ice floe size distribution tendency due to brittle fracture"     unit="1/s" />
+      <field id="icefsd_tend_wav" long_name="Sea ice floe size distribution tendency due to wave fracture"        unit="1/s" />
+      <field id="icepdd"          long_name="Sea ice perimeter density distribution"                              unit="m-1" />
 
     </field_group> <!-- FSD_3D -->
 
     <!-- FSD + ITD categories -->
     <field_group id="FSD_4D" grid_ref="grid_T_fstd_inner" >
 
-      <field id="icefsd_cat"      long_name="Sea ice floe size distribution in thickness categories"   unit="1" />
+      <field id="icefsd_cat"            long_name="Sea ice floe size distribution in thickness categories"                                     unit="1"   />
+      <field id="icefsd_cat_tend"       long_name="Sea ice floe size distribution in thickness categories tendency"                            unit="1/s" />
+      <field id="icefsd_cat_tend_dyn"   long_name="Sea ice floe size distribution in thickness categories tendency due to dynamics"            unit="1/s" />
+      <field id="icefsd_cat_tend_thd"   long_name="Sea ice floe size distribution in thickness categories tendency due to thermodynamics"      unit="1/s" />
+      <field id="icefsd_cat_tend_adv"   long_name="Sea ice floe size distribution in thickness categories tendency due to advection"           unit="1/s" />
+      <field id="icefsd_cat_tend_lam"   long_name="Sea ice floe size distribution in thickness categories tendency due to lateral melt"        unit="1/s" />
+      <field id="icefsd_cat_tend_lag"   long_name="Sea ice floe size distribution in thickness categories tendency due to lateral growth"      unit="1/s" />
+      <field id="icefsd_cat_tend_opw"   long_name="Sea ice floe size distribution in thickness categories tendency due to new ice formation"   unit="1/s" />
+      <field id="icefsd_cat_tend_wel"   long_name="Sea ice floe size distribution in thickness categories tendency due to floe welding"        unit="1/s" />
+      <field id="icefsd_cat_tend_bfr"   long_name="Sea ice floe size distribution in thickness categories tendency due to brittle fracture"    unit="1/s" />
+      <field id="icefsd_cat_tend_wav"   long_name="Sea ice floe size distribution in thickness categories tendency due to wave fracture"       unit="1/s" />
 
     </field_group> <!-- FSD_4D -->
 

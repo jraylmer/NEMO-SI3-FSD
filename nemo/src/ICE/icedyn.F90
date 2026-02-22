@@ -22,7 +22,8 @@ MODULE icedyn
    USE icecor         ! sea-ice: corrections
    USE icevar  , ONLY : ice_var_zapsmall
    USE icectl         ! sea-ice: control prints
-   USE icefsd  , ONLY : a_ifsd   ! sea-ice: floe size distribution
+   USE icefsd  , ONLY : a_ifsd, ice_fsd_brit   ! sea-ice: floe size distribution
+   USE icewav  , ONLY : ice_wav_frac           ! wave-ice interactions
    !
    USE in_out_manager ! I/O manager
    USE iom            ! I/O manager library
@@ -125,6 +126,25 @@ CONTAINS
          fast_vmask(ji,jj) = MAX( fast_tmask(ji,jj), fast_tmask(ji  ,jj+1) )
          icb_vmask (ji,jj) = MAX( icb_tmask (ji,jj), icb_tmask (ji  ,jj+1) )
       END_2D
+
+      !== Floe size distribution ==!
+      !
+      ! These two routines (ice_wav_frac, ice_fsd_brit) only affect a_ifsd,
+      ! not ice conc./thickness or other prognostic variables.
+      !
+      ! Not sure which cases below these would most make sense to be in or not
+      ! (probably in first 2?); ==> for now just do them in any case.
+      !
+      ! I think lbc_lnk is needed here (as well as at the end of ice_dyn) because a_ifsd is
+      ! advected afterwards and so needs to be up-to-date on the halos. We could get around it
+      ! by moving these calls after the other dynamics routines but it might be important to
+      ! do wave fracture first if the attenuation scheme (called before ice_dyn) is active.
+      !
+      IF( ln_fsd ) THEN
+         IF( ln_ice_wav )   CALL ice_wav_frac( kt )   ! -- fracture by ocean waves
+                            CALL ice_fsd_brit         ! -- in-plane (brittle) fracture
+                            CALL lbc_lnk( 'icedyn', a_ifsd, 'T', 1._wp, ldfull = .TRUE. )
+      ENDIF
 
       SELECT CASE( nice_dyn )          !-- Set which dynamics is running
 

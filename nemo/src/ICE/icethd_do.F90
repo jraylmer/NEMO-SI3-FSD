@@ -26,7 +26,7 @@ MODULE icethd_do
    USE icethd_sal     ! sea-ice: salinity profiles
    USE icefsd  , ONLY : ice_fsd_partition_newice, ice_fsd_add_newice,   &
       &                 ice_fsd_thd_evolve      , ice_fsd_welding   ,   &
-      &                 a_ifsd, nf_newice
+      &                 ice_fsd_dia             , a_ifsd, nf_newice
    USE icewav  , ONLY : ice_wav_newice
    USE in_out_manager ! I/O manager
    USE lib_mpp        ! MPP library
@@ -107,11 +107,19 @@ CONTAINS
       !
       REAL(wp), DIMENSION(0:nlay_i+1) ::   zh_i_old, ze_i_old, zs_i_old
       !
+      ! For floe size distribution:
       REAL(wp), DIMENSION(jpl) ::   zda_latgro        ! fsd: change in ice area due to lateral growth in cat. jl
       REAL(wp), DIMENSION(jpl) ::   zv_latgro_cat     ! fsd: lateral growth volume in cat. jl
       REAL(wp)                 ::   zv_latgro         ! fsd: lateral growth volume, total
       REAL(wp)                 ::   zv_newice_total   ! fsd: new ice + lat. growth, used when updating e_i and szv_i
       INTEGER                  ::   jcat_fsd          ! fsd: new ice floe size category
+      !
+      REAL(wp), DIMENSION(A2D(0),nn_nfsd,jpl) ::   za_ifsdb_latgro   ! a_ifsd before lateral growth, for diagnostics
+      REAL(wp), DIMENSION(A2D(0),nn_nfsd,jpl) ::   za_ifsda_latgro   ! "      after  lateral growth  "
+      REAL(wp), DIMENSION(A2D(0),nn_nfsd,jpl) ::   za_ifsda_newice   ! "      after  new ice growth  "
+      REAL(wp), DIMENSION(A2D(0),jpl)         ::   za_ib_latgro      ! a_i before lateral growth, for diagnostics
+      REAL(wp), DIMENSION(A2D(0),jpl)         ::   za_ia_latgro      ! "   after  lateral growth  "
+      REAL(wp), DIMENSION(A2D(0),jpl)         ::   za_ia_newice      ! "   after  new ice growth  "
       !
       !!-----------------------------------------------------------------------!
       !
@@ -132,7 +140,18 @@ CONTAINS
             npti = npti + 1
          ENDIF
       END_2D
-      
+
+      IF( ln_fsd ) THEN
+         ! Prepare before/after arrays for diagnostics computed externally in ice_fsd_dia:
+         ! (set all equal to initial values as some grid cells may not change):
+         za_ifsdb_latgro(A2D(0),:,:) = a_ifsd(A2D(0),:,:)
+         za_ifsda_latgro(A2D(0),:,:) = a_ifsd(A2D(0),:,:)
+         za_ifsda_newice(A2D(0),:,:) = a_ifsd(A2D(0),:,:)
+         za_ib_latgro(A2D(0),:) = a_i(A2D(0),:)
+         za_ia_latgro(A2D(0),:) = a_i(A2D(0),:)
+         za_ia_newice(A2D(0),:) = a_i(A2D(0),:)
+      ENDIF
+
       IF ( npti > 0 ) THEN
 
          ! Convert units for ice internal energy and salt content
@@ -288,6 +307,15 @@ CONTAINS
                      CALL ice_fsd_thd_evolve( a_ifsd(ji,jj,:,jl), zv_latgro / rDt_ice )
                      !
                   ENDIF
+                  !
+                  ! Save FSD and a_i after lateral growth for diagnostics:
+                  IF( ln_fsd ) THEN
+                     za_ifsda_latgro(ji,jj,:,jl) = a_ifsd(ji,jj,:,jl)
+                     !
+                     ! CAREFUL: a_i has now evolved due to new ice AND lateral growth. So, get what it
+                     ! would be only due to lateral growth from za_b (start of time step) and zda_latgro:
+                     za_ia_latgro(ji,jj,jl) = za_b(jl) + zda_latgro(jl)
+                  ENDIF
                   ! ------------------------------ !
 
                   at_i(ji,jj) = at_i(ji,jj) + a_i(ji,jj,jl)
@@ -312,6 +340,13 @@ CONTAINS
                   CALL ice_fsd_add_newice( a_ifsd(ji,jj,:,jcat)         , za_newice,   &
                      &                     za_b(jcat) + zda_latgro(jcat), jcat_fsd     )
                   !
+                  ! Save FSD and a_i after adding new ice for diagnostics
+                  !
+                  ! Note diagnostics are done in the order that FSD is updated (latgro then newice, and later welding)
+                  ! za_ifsda_newice and za_ia_newice really mean 'after new ice AND lateral growth'
+                  ! Both variables at their current state now include both processes:
+                  za_ifsda_newice(ji,jj,:,:) = a_ifsd(ji,jj,:,:)
+                  za_ia_newice   (ji,jj,  :) = a_i   (ji,jj,  :)
                ENDIF
 
                ! Heat content
@@ -398,6 +433,15 @@ CONTAINS
          !
       ENDIF ! npti > 0
       !
+      ! Floe size distribution: tendency diagnostics (lateral growth 'lag'; new ice/open water 'opw'; welding 'wel')
+      IF( ln_fsd ) THEN
+         !               !-------------------------------------------------------------------------------!
+         !               ! Process |   FSTD before   |    FSTD after     |  a_i before  |   a_i after    !
+         !               !---------+-----------------+-------------------+--------------+----------------!
+         CALL ice_fsd_dia(  'lag'  , za_ifsdb_latgro ,  za_ifsda_latgro  , za_ib_latgro , za_ia_latgro   )
+         CALL ice_fsd_dia(  'opw'  , za_ifsda_latgro ,  za_ifsda_newice  , za_ia_latgro , za_ia_newice   )
+         CALL ice_fsd_dia(  'wel'  , za_ifsda_newice , a_ifsd(A2D(0),:,:), a_i(A2D(0),:), a_i (A2D(0),:) )
+      ENDIF
       !
       ! the following fields need to be updated on the halos (done in icethd): a_i, v_i, sv_i, e_i 
       !

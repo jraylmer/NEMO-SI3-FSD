@@ -575,6 +575,7 @@ CONTAINS
       REAL(wp),                       INTENT(inout) ::   pwpf     ! wave peak frequency (Hz)
       REAL(wp),                       INTENT(inout) ::   pwmp     ! wave mean period (s)
       !
+      INTEGER  ::   imax    ! index of maximum in pwspec
       REAL(wp) ::   zm0     ! zeroth-moment of the wave spectrum (m2)
       REAL(wp) ::   zm1     ! first-moment of the wave spectrum (m2.s-1)
       !
@@ -588,7 +589,8 @@ CONTAINS
       phsw = 4._wp * SQRT( zm0 )
 
       ! Wave peak frequency:
-      pwpf = wfreq(MAXLOC(pwspec(:), DIM=1))
+      imax = MAXLOC(pwspec(:), DIM=1)
+      pwpf = wfreq(imax)
 
       ! Wave mean period:
       IF( zm1 > 0._wp ) THEN

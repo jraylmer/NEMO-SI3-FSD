@@ -353,10 +353,19 @@
    ln_ice_wav       = .false.         ! activate wave-ice interactions (T) or not (F)
                                       ! (note: if T, also need ln_fsd=T in namfsd and ln_wave=T in namsbc)
                    ! -- input/config  -- !
+      ln_ice_wav_spec = .false.          ! read full wave energy spectrum from wave model or forcing
+                                         !   (note: if T, also need ln_wave_spec=T in namsbc_wave)
+                   ! -- attenuation   -- !
       ln_ice_wav_attn = .false.          ! activate wave-in-ice attenuation scheme (Roach et al. 2018)
          rn_attn_lam_tol = 1.5           !   longitude tolerance for identifying meridians (degrees east)
-      ln_ice_wav_spec = .false.          ! read full wave energy spectrum from wave model or forcing
-                                         ! (note: if T, also need ln_wave_spec=T in namsbc_wave)
+                                         !   terms in attenuation coefficient, quadratic approx. for ln[a(T,h)] from HT15:
+         rn_attn_c0      = -0.3203       !      constant term
+         rn_attn_ch      =  2.0580       !      factor of ice thickness, h
+         rn_attn_ct      = -0.9375       !      factor of wave period, T
+         rn_attn_ch2     = -0.4269       !      factor of h^2
+         rn_attn_ct2     =  0.0006       !      factor of T^2
+         rn_attn_cht     =  0.1566       !      factor of h*T
+         rn_attn_tun     =  1.0          !   overall tuning factor on a(T,h) [NOT logarithm]
                    ! -- wave breakup  -- !
       rn_ice_wav_ecri = 3.e-05           ! critical strain at which ice fractures (dimensionless)
       nn_frac_scheme  = 4                ! Wave fracture scheme selection

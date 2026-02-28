@@ -87,9 +87,17 @@ MODULE icewav
    REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:,:)   ::   gphit_glo   ! T-grid latitude (degrees north)
 
    !                                     !!* namelist (namwav) *
-   REAL(wp)        ::   rn_ice_wav_ecri   !: Critical strain at which ice fractures due to waves (dimensionless)
    REAL(wp)        ::   rn_attn_lam_tol   !: Attenuation scheme longitude tolerance for identifying meridians (degrees E)
+   !                                      !  Terms in attenuation coefficient, quadratic approx. for ln[a(T,h)] from HT15:
+   REAL(wp)        ::   rn_attn_c0        !:    constant term
+   REAL(wp)        ::   rn_attn_ch        !:    factor of ice thickness, h
+   REAL(wp)        ::   rn_attn_ct        !:    factor of wave period, T
+   REAL(wp)        ::   rn_attn_ch2       !:    factor of h^2
+   REAL(wp)        ::   rn_attn_ct2       !:    factor of T^2
+   REAL(wp)        ::   rn_attn_cht       !:    factor of h*T
+   REAL(wp)        ::   rn_attn_tun       !: Overall tuning factor on a(h,T) [NOT logarithm of a]
    INTEGER         ::   nn_frac_scheme    !: Selection of wave-ice fracture scheme
+   REAL(wp)        ::   rn_ice_wav_ecri   !: Critical strain at which ice fractures due to waves (dimensionless)
    REAL(wp)        ::   rn_y24a_cw        !: Parameter in Y24A fracture scheme
    REAL(wp)        ::   rn_y24a_alpha     !: Parameter in Y24A fracture scheme
    INTEGER         ::   nn_ht15_nx1d      !: Size of 1D subdomain for wave fracture calculation (HT15 only)
@@ -360,13 +368,6 @@ CONTAINS
       INTEGER                            ::   ji, jj, jf, jl, jw, ji_glo, jj_glo   ! dummy loop indices
       INTEGER , DIMENSION(2)             ::   isource                              ! indices of source grid cells (in global domain)
       !
-      REAL(wp), PARAMETER ::   zc0      = -0.3203_wp   ! attenuation coefficient from HT15 (constant term      )
-      REAL(wp), PARAMETER ::   zch      =  2.0580_wp   ! attenuation coefficient from HT15 (coefficient of hi  )
-      REAL(wp), PARAMETER ::   zct      = -0.9375_wp   ! attenuation coefficient from HT15 (coefficient of T   )
-      REAL(wp), PARAMETER ::   zch2     = -0.4269_wp   ! attenuation coefficient from HT15 (coefficient of hi^2)
-      REAL(wp), PARAMETER ::   zct2     =  0.0006_wp   ! attenuation coefficient from HT15 (coefficient of T^2 )
-      REAL(wp), PARAMETER ::   zcht     =  0.1566_wp   ! attenuation coefficient from HT15 (coefficient of hi*T)
-      !
       REAL(wp), PARAMETER ::   zf_noice = -1._wp       ! dummy flag value < 0        for ice-free ocean grid cell
       REAL(wp), PARAMETER ::   zf_land  = -2._wp       ! dummy flag value < zf_noice for land grid cell
       !
@@ -412,12 +413,12 @@ CONTAINS
                ! Calculate the (natural) logarithm of the attenuation coefficient for
                ! this period (= 1/frequency) using the quadratic approx. given in HT15:
                !
-               zloga = zc0 + zch  * zhi             + zct  / wfreq(jw)      &
-                  &        + zch2 * zhi**2          + zct2 / wfreq(jw)**2   &
-                  &        + zcht * zhi / wfreq(jw)
+               zloga = rn_attn_c0 + rn_attn_ch  * zhi             + rn_attn_ct  / wfreq(jw)      &
+                  &               + rn_attn_ch2 * zhi**2          + rn_attn_ct2 / wfreq(jw)**2   &
+                  &               + rn_attn_cht * zhi / wfreq(jw)
                !
                ! Save the exponent of the damping factor:
-               zattxp(jw) = znfloes * EXP(zloga)
+               zattxp(jw) = znfloes * rn_attn_tun * EXP(zloga)
                !
             ENDDO
 
@@ -1579,7 +1580,9 @@ CONTAINS
       NAMELIST/namwav/ ln_ice_wav     , ln_ice_wav_spec, rn_ice_wav_ecri, nn_frac_scheme,   &
          &             rn_y24a_cw     , rn_y24a_alpha  ,                                    &
          &             nn_ht15_nx1d   , rn_ht15_dx1d   , nn_ht15_rmin   , ln_ht15_rand  ,   &
-         &             ln_ice_wav_attn, rn_attn_lam_tol
+         &             ln_ice_wav_attn, rn_attn_lam_tol, rn_attn_c0     , rn_attn_ch    ,   &
+         &             rn_attn_ch     , rn_attn_ct     , rn_attn_ch2    , rn_attn_ct2   ,   &
+         &             rn_attn_cht    , rn_attn_tun
       !!-------------------------------------------------------------------
       !
       READ_NML_REF(numnam_ice, namwav)
@@ -1594,6 +1597,14 @@ CONTAINS
          WRITE(numout,*) '      Wave-ice interactions active or not                        ln_ice_wav = ', ln_ice_wav
          WRITE(numout,*) '         Activate wave-in-ice attenuation scheme or not     ln_ice_wav_attn = ', ln_ice_wav_attn
          WRITE(numout,*) '            Longitude tolerance for meridians (deg E)       rn_attn_lam_tol = ', rn_attn_lam_tol
+         WRITE(numout,*) '            Attenuation coefficient, factors in quadratic expression for ln[a(T,h)]:'
+         WRITE(numout,*) '               Constant term                                     rn_attn_c0 = ', rn_attn_c0
+         WRITE(numout,*) '               Factor of ice thickness (h)                       rn_attn_ch = ', rn_attn_ch
+         WRITE(numout,*) '               Factor of wave period (T)                         rn_attn_ct = ', rn_attn_ct
+         WRITE(numout,*) '               Factor of h^2                                    rn_attn_ch2 = ', rn_attn_ch2
+         WRITE(numout,*) '               Factor of T^2                                    rn_attn_ct2 = ', rn_attn_ct2
+         WRITE(numout,*) '               Factor of h*T                                    rn_attn_cht = ', rn_attn_cht
+         WRITE(numout,*) '            Tuning factor on a(T,h)                             rn_attn_tun = ', rn_attn_tun
          WRITE(numout,*) '         Read full wave energy spectrum or not              ln_ice_wav_spec = ', ln_ice_wav_spec
          WRITE(numout,*) '         Critical strain at which ice breaks due to waves   rn_ice_wav_ecri = ', rn_ice_wav_ecri
          WRITE(numout,*) '         Wave fracture scheme selection                     nn_frac_scheme  = ', nn_frac_scheme

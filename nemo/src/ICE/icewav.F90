@@ -718,6 +718,9 @@ CONTAINS
          !
          IF( at_i(ji,jj) > zat_i_min ) THEN
             !
+            zQfrac(:)   = 0._wp   ! reset from previous iterations
+            zBfrac(:,:) = 0._wp   ! (done in scheme subroutines too but repeat here to be safe)
+            !
             ! (1) Calculate wave spectrum, if needed. Condition depends on combination of various
             ! namelist flags; the net condition is saved in module variable l_frac_calc_spec
             !
@@ -921,14 +924,14 @@ CONTAINS
       !
       !!-------------------------------------------------------------------
 
+      zQfrac(:) = 0._wp   ! reset/initialise, and return value if strain not exceeded
+
       zstrain = 2.5_wp * rpi**4 * ph_i * phsw / (grav**2 * pwmp**4)
 
       IF( zstrain >= rn_ice_wav_ecri ) THEN
          DO jf = 1, nn_nfsd
             pQfrac(jf) = rn_y24a_cw * EXP( -rn_y24a_alpha * (1._wp - floe_rc(jf) / floe_rc(nn_nfsd)) )
          ENDDO
-      ELSE
-         pQfrac(:) = 0._wp
       ENDIF
 
       pBfrac(:,:) = Bfrac_uni(:,:)   ! uniform redistribution

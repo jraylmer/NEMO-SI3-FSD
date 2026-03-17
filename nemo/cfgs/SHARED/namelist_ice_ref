@@ -369,9 +369,17 @@
                    ! -- wave breakup  -- !
       rn_ice_wav_ecri = 3.e-05           ! critical strain at which ice fractures (dimensionless)
       nn_frac_scheme  = 4                ! Wave fracture scheme selection
+                                         !    1 = Zhang et al. (2016)
                                          !    2 = Yang et al. 2024 (A)
                                          !    3 = Yang et al. 2024 (B)
                                          !    4 = Horvat and Tziperman (2015)
+                 ! -- nn_frac_scheme=1 --!
+         ln_z16_const  = .false.         ! Fracture participation factor is a constant (=> Zhang et al. 2015 behaviour)
+         rn_z16_cb     = 0.8             !    Constant participation factor, if ln_z16_const = T
+         rn_z16_k      = 2.6e-6          !    Variable participation factor, parameter k
+         rn_z16_a      = 1.5             !    Variable participation factor, parameter a
+         rn_z16_b      = 3.5             !    Variable participation factor, parameter b
+         rn_z16_hc     = 0.2             !    Variable participation factor, cutoff thickness parameter
                  ! -- nn_frac_scheme=2 --!
          rn_y24a_cw    = 0.8             ! Fracture probability function tuning parameter (0 < cw <= 1)
          rn_y24a_alpha = 1.0             ! Fracture probability function tuning parameter (alpha > 0)

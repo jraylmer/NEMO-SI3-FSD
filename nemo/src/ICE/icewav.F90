@@ -15,6 +15,7 @@ MODULE icewav
    !!   ice_wav_attn    : calculate attenuated wave spectrum under ice
    !!   ice_wav_calc    : calculate wave properties under ice
    !!   ice_wav_frac    : wave breakup of ice, main routine called by ice_stp
+   !!   wav_frac_z16    : wave fracture scheme (Zhang et al. 2016)
    !!   wav_frac_y24a   : wave fracture scheme (Yang et al. 2024 method A)
    !!   wav_frac_y24b   : wave fracture scheme (Yang et al. 2024 method B)
    !!   wav_frac_ht15   : wave fracture scheme (Horvat and Tziperman 2015)
@@ -28,8 +29,8 @@ MODULE icewav
 
    USE par_ice           ! SI3 parameters
    USE phycst , ONLY :   rpi, grav, rhoi
-   USE sbc_oce, ONLY :   ln_wave, ln_wave_spec, nn_nwfreq        ! SBC: wave module
-   USE sbcwave, ONLY :   hsw, wpf, wmp, wfreq, wdfreq, wspec     ! SBC: wave variables
+   USE sbc_oce, ONLY :   wndm, ln_wave, ln_wave_spec, nn_nwfreq   ! SBC module
+   USE sbcwave, ONLY :   hsw, wpf, wmp, wfreq, wdfreq, wspec      ! SBC: wave variables
    USE ice               ! sea-ice: variables
    USE icefsd , ONLY :   a_ifsd, nf_newice, floe_rl, floe_rc, floe_ru, floe_dr   ! floe size distribution parameters/variables
    USE icefsd , ONLY :   rDt_ice_fsd, fsd_cleanup, ice_fsd_dia                   ! floe size distribution functions/routines
@@ -75,6 +76,7 @@ MODULE icewav
    REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:,:) ::   Bfrac_uni   ! uniform fracture redistributor (Y24a scheme)
    REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:,:) ::   stmer       ! meridional distance across T cells (m)
 
+   INTEGER, PARAMETER ::   jpfrac_z16  = 1   ! option for nn_frac_scheme -> Zhang et al. (2016) scheme
    INTEGER, PARAMETER ::   jpfrac_y24a = 2   ! option for nn_frac_scheme -> Yang et al. (2024) scheme A
    INTEGER, PARAMETER ::   jpfrac_y24b = 3   ! option for nn_frac_scheme -> Yang et al. (2024) scheme B
    INTEGER, PARAMETER ::   jpfrac_ht15 = 4   ! option for nn_frac_scheme -> Horvat and Tziperman (2015) scheme
@@ -98,6 +100,12 @@ MODULE icewav
    REAL(wp)        ::   rn_attn_tun       !: Overall tuning factor on a(h,T) [NOT logarithm of a]
    INTEGER         ::   nn_frac_scheme    !: Selection of wave-ice fracture scheme
    REAL(wp)        ::   rn_ice_wav_ecri   !: Critical strain at which ice fractures due to waves (dimensionless)
+   LOGICAL         ::   ln_z16_const      !: Use constant participation factor (--> recover Zhang et al. 20*15* scheme)
+   REAL(wp)        ::   rn_z16_cb         !: Constant participation factor if ln_z16_const
+   REAL(wp)        ::   rn_z16_k          !: Z16 scheme dimensionless parameter 'k'
+   REAL(wp)        ::   rn_z16_a          !: Z16 scheme dimensionless parameter 'a'
+   REAL(wp)        ::   rn_z16_b          !: Z16 scheme dimensionless parameter 'b'
+   REAL(wp)        ::   rn_z16_hc         !: Z16 scheme cutoff ice thickness (m)
    REAL(wp)        ::   rn_y24a_cw        !: Parameter in Y24A fracture scheme
    REAL(wp)        ::   rn_y24a_alpha     !: Parameter in Y24A fracture scheme
    INTEGER         ::   nn_ht15_nx1d      !: Size of 1D subdomain for wave fracture calculation (HT15 only)
@@ -214,6 +222,9 @@ CONTAINS
       !!
       !! ** Callers :   ice_thd_do -> [ice_wav_newice]
       !!
+      !! ** Note    :   if fracture scheme is Z16, which does not use wave data, the calculation
+      !!                is bypassed and instead returns the default new floe size category
+      !!
       !! ** References
       !!    ----------
       !!    Roach, L. A., Bitz, C. M., Horvat, C., & Dean, S. M. (2019).
@@ -232,7 +243,7 @@ CONTAINS
       !
       !!-------------------------------------------------------------------
 
-      IF( (phsw < epsi06) .OR. (pwpf < epsi06) ) THEN
+      IF( (nn_frac_scheme == jpfrac_z16) .OR. (phsw < epsi06) .OR. (pwpf < epsi06) ) THEN
          !
          kcat = nf_newice   ! no waves present => set to default new floe size category
          !
@@ -655,7 +666,7 @@ CONTAINS
       !!                     is (possibly) required, calculated in function rDt_ice_fsd() in module icefsd.
       !!
       !! ** Callers :   ice_stp -> [ice_wav_frac]
-      !! ** Calls   :              [ice_wav_frac] -> wav_frac_{y24a,y24b,ht15}
+      !! ** Calls   :              [ice_wav_frac] -> wav_frac_{z16,y24a,y24b,ht15}
       !! ** Invokes :              [ice_wav_frac] -> wav_spec_bret()   (ln_ice_wav_spec = F AND ln_ice_wav_attn = F)
       !!                           [ice_wav_frac] -> rDt_ice_fsd()
       !!
@@ -702,9 +713,11 @@ CONTAINS
       ! ToDo: move this to sbc_wave_init?
       !
       IF( kt == nit000 ) THEN   ! at first time-step
-         ALLOCATE( wlam(nn_nwfreq), wknum(nn_nwfreq) )
-         wlam(:)  = grav / (2._wp * rpi * wfreq(:)**2)
-         wknum(:) = 2._wp * rpi / wlam(:)
+         IF( nn_frac_scheme /= jpfrac_z16 ) THEN   ! frequencies undefined in this case!
+            ALLOCATE( wlam(nn_nwfreq), wknum(nn_nwfreq) )
+            wlam(:)  = grav / (2._wp * rpi * wfreq(:)**2)
+            wknum(:) = 2._wp * rpi / wlam(:)
+         ENDIF
       ENDIF
 
       za_ifsdb(A2D(0),:,:) = a_ifsd(A2D(0),:,:)   ! save a_ifsd before fracture for tendency diagnostics
@@ -733,6 +746,11 @@ CONTAINS
             zh_i = vt_i(ji,jj) / at_i(ji,jj)   ! mean ice thickness
             !
             SELECT CASE( nn_frac_scheme )
+               CASE( jpfrac_z16  )
+                  !
+                  CALL wav_frac_z16( wndm(ji,jj)      , zh_i     , a_i(ji-1:ji+1,jj-1:jj+1,:),   &
+                     &               a_ifsd(ji,jj,:,:), zQfrac(:), zBfrac(:,:) )
+                  !
                CASE( jpfrac_y24a )
                   !
                   CALL wav_frac_y24a( hsw(ji,jj), wmp(ji,jj), zh_i, zQfrac(:), zBfrac(:,:) )
@@ -859,6 +877,124 @@ CONTAINS
    END SUBROUTINE ice_wav_frac
 
 
+   SUBROUTINE wav_frac_z16( puatm, ph_i, pa_i, pa_ifsd, pQfrac, pBfrac )
+      !!-------------------------------------------------------------------
+      !!                 *** ROUTINE wav_frac_z16 ***
+      !!
+      !! ** Purpose :   Calculate the probability and redistribution functions for the
+      !!                equation evolving the FSD due to wave fracture for the scheme of
+      !!                Zhang et al. (2016).
+      !!
+      !! ** Method  :   Fracture scheme that does *not* use wave forcing data (file or coupled model).
+      !!                The probability of a floe of size r undergoing fracture, Q(r), is given by:
+      !!
+      !!                   Q(r) = MAX[ 0, 1 - int( f(r')dr' )/cb ]
+      !!
+      !!                where f(r') is the floe size distribution (integrated over thickness) and cb
+      !!                is called a 'participation factor' representing the area fraction of ice that
+      !!                could participate in fracture. In Zhang et al. (2015) this is set to a constant
+      !!                and this behaviour can be achieved by setting namelist parameter ln_z16_const=T
+      !!                and rn_z16_cb as required. In Zhang et al. (2016), this scheme was upgraded to
+      !!                work in a GCM setting and cb is instead calculated from local wind speed U and
+      !!                ice properties, as follows, which is the behaviour when ln_z16_const=F:
+      !!
+      !!                   c_b = [kU/MAX(hi,hc)] * EXP[ -a(1 - f0) - b(1 - ra/rmax) ] * dt
+      !!
+      !!                where k, a, and b are dimensionless constants (set in namelist), hi is mean ice
+      !!                thickness, hc is a cutoff thickness (namelist), f0 is open water fraction,
+      !!                ra is mean floe size, rmax is the largest resolved floe size, and dt is the model
+      !!                timestep. The open water fraction is calculated as an average over the grid cell
+      !!                and its eight surrounding neighbours.
+      !!
+      !!                The redistribution function is determined by assuming any floe of size s
+      !!                that is undergoing wave fracture is equally likely to fracture into any
+      !!                other floe size r < s. This 'unifom redistributor' is calculed in
+      !!                subroutine ice_wav_init as it is a constant.
+      !!
+      !! ** Inputs  :   puatm                   :   local wind speed (m/s)
+      !!                ph_i                    :   local mean ice thickness (m)
+      !!                pa_i(3,3,jpl)           :   sea ice concentration at local and 8 neighbouring cells
+      !!                pa_ifsd(nn_nfsd,jpl)    :   local areal floe size-thickness distribution
+      !!
+      !! ** Outputs :   pQfrac(nn_nfsd)         :   fracture probability function (s-1)
+      !!                pBfrac(nn_nfsd,nn_nfsd) :   fracture redistribution function, B(s,r)dr
+      !!                                            (note: first  index corresponds to original floe size s,
+      !!                                                   second index corresponds to fractured floe size r)
+      !!
+      !! ** Callers :   ice_wav_frac --> [wav_frac_z16]
+      !!
+      !! ** Notes   :   A key distinction of this scheme (beyond it not using wave data) is that it
+      !!                technically includes any wind-driven fracture process. In the MIZ, this is
+      !!                dominantly wave mediated, but in the pack ice it is mediated by deformation
+      !!                and internal stresses. So, with this scheme, there may be a need to adjust
+      !!                the brittle fracture (routine ice_fsd_bri) parameters to compensate.
+      !!
+      !! ** References
+      !!    ----------
+      !!    Zhang, J., Schweiger, A., Steele, M., & Stern, H. (2015).
+      !!              Sea ice floe size distribution in the marginal ice zone: Theory and numerical experiments.
+      !!              Journal of Geophysical Research: Oceans, 120(5), 3484-3498.
+      !!    Zhang, J., Stern, H., Hwang, B., Schweiger, A., Steele, M., Stark, M., & Graber, H.C.
+      !!              Modeling the seasonal evolution of the Arctic sea ice floe size distribution.
+      !!              Elementa, 4(000126)
+      !!-------------------------------------------------------------------
+      !
+      REAL(wp)                            , INTENT(in)    ::   puatm     ! local near-surface wind speed (m/s)
+      REAL(wp)                            , INTENT(in)    ::   ph_i      ! local mean sea ice thickness (m)
+      REAL(wp), DIMENSION(3,3,jpl)        , INTENT(in)    ::   pa_i      ! ice concentration, local and 8 surrounding cells
+      REAL(wp), DIMENSION(nn_nfsd,jpl)    , INTENT(in)    ::   pa_ifsd   ! local floe size-thickness distribution
+      REAL(wp), DIMENSION(nn_nfsd)        , INTENT(inout) ::   pQfrac    ! wave fracture probability function (s-1)
+      REAL(wp), DIMENSION(nn_nfsd,nn_nfsd), INTENT(inout) ::   pBfrac    ! wave fracture redistribution function, B(s,r)dr
+      !
+      REAL(wp), DIMENSION(nn_nfsd) ::   zfsd         ! floe size distribution, integrated over thickness
+      REAL(wp)                     ::   zr_a         ! mean floe size
+      REAL(wp)                     ::   z1minusf_0   ! 1 minus fetch parameter
+      REAL(wp)                     ::   zc_b         ! participation factor
+      INTEGER                      ::   jf           ! dummy loop index
+      !
+      !!-------------------------------------------------------------------
+
+      ! --- Calculate floe size distribution integrated over thickness
+      !     and mean floe size (only needed if ln_z16_const = F)
+      zfsd(:) = 0._wp
+      zr_a    = 0._wp   ! initialise
+
+      ! Note: pa_i(2,2,:) is the current grid cell (other indices are surrounding 8 cells)
+      ! Hard-coding this for now; maybe in the future make number of surrounding cells
+      ! an option, then calculate this, size of input array, and averaging factor (9 below)
+      ! including checks against nn_hls (for now not needed as nn_hls >= 1):
+      DO jf = 1, nn_nfsd
+         zfsd(jf) = SUM( pa_ifsd(jf,:) * pa_i(2,2,:) )
+         zr_a     = zr_a + floe_rc(jf) * zfsd(jf)
+      ENDDO
+
+      ! --- Calculate participation factor, zc_b --- !
+      !
+      IF( ln_z16_const ) THEN
+         ! Use constant participation factor (as in Zhang et al. 2015, Eq. 15):
+         zc_b = rn_z16_cb
+         !
+      ELSE
+         ! Use variable participation factor (as in Zhang et al. 2016, Eq. 5)
+         !
+         ! Calculate 1 - f_0, where f_0 open water fraction in local + 8 surrounding grid cells
+         ! (see comment above: hard-coding the factor of 9 for now):
+         z1minusf_0 = SUM( pa_i(:,:,:) ) / 9._wp
+         !
+         zc_b = EXP( -rn_z16_a * z1minusf_0 - rn_z16_b * (1._wp - zr_a/floe_rc(nn_nfsd)) )
+         zc_b = zc_b * rn_z16_k * puatm * rDt_ice / MAX( ph_i, rn_z16_hc )
+      ENDIF
+
+      ! --- Calculate source terms --- !
+      DO jf = 1, nn_nfsd
+         pQfrac(jf) = MAX( 0._wp, 1._wp - SUM(zfsd(jf:nn_nfsd)) / zc_b )
+      ENDDO
+
+      pBfrac(:,:) = Bfrac_uni(:,:)   ! uniform redistribution
+
+   END SUBROUTINE wav_frac_z16
+
+
    SUBROUTINE wav_frac_y24a( phsw, pwmp, ph_i, pQfrac, pBfrac )
       !!-------------------------------------------------------------------
       !!                 *** ROUTINE wav_frac_y24a ***
@@ -924,7 +1060,7 @@ CONTAINS
       !
       !!-------------------------------------------------------------------
 
-      zQfrac(:) = 0._wp   ! reset/initialise, and return value if strain not exceeded
+      pQfrac(:) = 0._wp   ! reset/initialise, and return value if critical strain not exceeded
 
       zstrain = 2.5_wp * rpi**4 * ph_i * phsw / (grav**2 * pwmp**4)
 
@@ -1581,6 +1717,8 @@ CONTAINS
       !
       !!
       NAMELIST/namwav/ ln_ice_wav     , ln_ice_wav_spec, rn_ice_wav_ecri, nn_frac_scheme,   &
+         &             ln_z16_const   , rn_z16_cb      , rn_z16_k       , rn_z16_a      ,   &
+         &             rn_z16_b       , rn_z16_hc      ,                                    &
          &             rn_y24a_cw     , rn_y24a_alpha  ,                                    &
          &             nn_ht15_nx1d   , rn_ht15_dx1d   , nn_ht15_rmin   , ln_ht15_rand  ,   &
          &             ln_ice_wav_attn, rn_attn_lam_tol, rn_attn_c0     , rn_attn_ch    ,   &
@@ -1611,6 +1749,14 @@ CONTAINS
          WRITE(numout,*) '         Read full wave energy spectrum or not              ln_ice_wav_spec = ', ln_ice_wav_spec
          WRITE(numout,*) '         Critical strain at which ice breaks due to waves   rn_ice_wav_ecri = ', rn_ice_wav_ecri
          WRITE(numout,*) '         Wave fracture scheme selection                     nn_frac_scheme  = ', nn_frac_scheme
+         WRITE(numout,'(A,I0,A)') '            Zhang et al. (2016) scheme parameters  (nn_frac_scheme = ', jpfrac_z16, '):'
+         WRITE(numout,*) '               Use constant participation factor               ln_z16_const = ', ln_z16_const
+         WRITE(numout,*) '                  If T, the value is                        rn_z16_cb = ', rn_z16_cb
+         WRITE(numout,*) '                  If F, calculate it with:'
+         WRITE(numout,*) '                     parameter k                               rn_z16_k = ', rn_z16_k
+         WRITE(numout,*) '                     parameter a                               rn_z16_a = ', rn_z16_a
+         WRITE(numout,*) '                     parameter b                               rn_z16_b = ', rn_z16_b
+         WRITE(numout,*) '                     Cutoff ice thickness                     rn_z16_hc = ', rn_z16_hc
          WRITE(numout,'(A,I0,A)') '            Yang et al. (2024) A scheme parameters (nn_frac_scheme = ', jpfrac_y24a, '):'
          WRITE(numout,*) '               Probability function parameter c_w           rn_y24a_cw      = ', rn_y24a_cw
          WRITE(numout,*) '               Probability function parameter alpha         rn_y24a_alpha   = ', rn_y24a_alpha
@@ -1626,8 +1772,11 @@ CONTAINS
          ! Checks on flags that do not require knowning SBC wave module flags
          ! (those are handled in subroutine sbc_wave_init).
          !
-         ! Wave-ice interactions module requires both wave inputs and FSD:
-         IF( .NOT. ln_wave ) CALL ctl_stop('ice_wav_init: ln_ice_wav=T but SBC wave module inactive (ln_wave=F)')
+         ! Wave-ice interactions module requires both wave inputs and FSD
+         ! (exception: fracture scheme is Z16, in which case only FSD is needed)
+         IF( (nn_frac_scheme /= jpfrac_z16) .AND. .NOT. ln_wave )   &
+            &                CALL ctl_stop('ice_wav_init: ln_ice_wav=T but SBC wave module inactive (ln_wave=F)')
+         !
          IF( .NOT. ln_fsd  ) CALL ctl_stop('ice_wav_init: ln_ice_wav=T but FSD inactive (ln_fsd=F)')
 
          ! Warn if both attenuation scheme and reading of full wave spectrum selected
@@ -1643,7 +1792,7 @@ CONTAINS
          !
          ! If fracture scheme uses constant redistributor function, calculate it now
          ! (see Zhang et al. 2015; JGR:O for theory):
-         IF( nn_frac_scheme == jpfrac_y24a ) THEN
+         IF( (nn_frac_scheme == jpfrac_z16) .OR. (nn_frac_scheme == jpfrac_y24a) ) THEN
             !
             ALLOCATE( Bfrac_uni(nn_nfsd,nn_nfsd), STAT=ierr )
             !

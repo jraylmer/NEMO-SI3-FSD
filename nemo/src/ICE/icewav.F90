@@ -381,6 +381,7 @@ CONTAINS
       !
       REAL(wp), PARAMETER ::   zf_noice = -1._wp       ! dummy flag value < 0        for ice-free ocean grid cell
       REAL(wp), PARAMETER ::   zf_land  = -2._wp       ! dummy flag value < zf_noice for land grid cell
+      REAL(wp), PARAMETER ::   zhsw_min = .01_wp       ! minimum sig. wave height to calculate local spectrum at source cells
       !
       !!-------------------------------------------------------------------
 
@@ -433,14 +434,27 @@ CONTAINS
                !
             ENDDO
 
-         ELSEIF( tmask(ji,jj,1) < 1._wp ) THEN
-            zattxp(:) = zf_land    ! set land flag
-         ELSE
-            zattxp(:) = zf_noice   ! set no-ice flag
-         ENDIF
+            ! Wave spectrum: force to be zero under ice (we will either calculate it below,
+            ! or there will be no 'source' wave data in which case this needs to be left as zero):
+            wspec(ji,jj,:) = 0._wp
 
-         ! Calculate wave spectrum (*ALL* grid cells), if needed:
-         IF( l_attn_calc_spec ) wspec(ji,jj,:) = wav_spec_bret( hsw(ji,jj), wpf(ji,jj) )
+         ELSEIF( tmask(ji,jj,1) < 1._wp ) THEN
+            zattxp(:) = zf_land      ! set land flag
+            wspec(ji,jj,:) = 0._wp   ! set no wave spectrum data (not used anyway)
+         ELSE
+            zattxp(:) = zf_noice     ! set no-ice flag
+            !
+            ! Set wave spectrum for this open-ocean grid cell if needed:
+            !    if reading spectrum from file/model, then l_attn_calc_spec=F => do nothing
+            !    otherwise, calculate from hsw and wpf, but only if hsw is large enough:
+            IF( l_attn_calc_spec ) THEN
+               IF( hsw(ji,jj) >= zhsw_min ) THEN
+                  wspec(ji,jj,:) = wav_spec_bret( hsw(ji,jj), wpf(ji,jj) )
+               ELSE
+                  wspec(ji,jj,:) = 0._wp
+               ENDIF
+            ENDIF
+         ENDIF
 
          ! ======================================================== !
          ! 2  Transfer data into global domain, global scope arrays !
@@ -523,13 +537,17 @@ CONTAINS
                   wspec(ji,jj,jw) = zwspec_glo(isource(1),isource(2),jw) * EXP(-zattxp_tot)
                ENDDO
                !
-               ! =========================================================== !
-               ! 4  Calculate attenuated wave properties at target grid cell !
-               ! =========================================================== !
-               !
-               CALL ice_wav_calc( wspec(ji,jj,:), hsw(ji,jj), wpf(ji,jj), wmp(ji,jj) )
-               !
             ENDIF
+            !
+            ! =========================================================== !
+            ! 4  Calculate attenuated wave properties at target grid cell !
+            ! =========================================================== !
+            ! Important to do this regardless of whether source grid cell found:
+            !    if there was, wspec will have just been updated as attenuated value
+            !       otherwise, wspec will be 0 here (set in step 1 of this routine)
+            ! Either way, wave fields hsw, wpf, and wmp need to be (re)calculated under ice
+            !
+            CALL ice_wav_calc( wspec(ji,jj,:), hsw(ji,jj), wpf(ji,jj), wmp(ji,jj) )
             !
          ENDIF
       END_2D
@@ -1880,7 +1898,13 @@ CONTAINS
             WRITE(numout,*) '                    ==> wave attenuation scheme will calculate spectrum = ', l_attn_calc_spec
          ENDIF
 
-      ENDIF   ! ln_ice_wav
+      ELSE
+         ! ln_ice_wav = F; force some parameters to be F to avoid issues:
+         l_frac_calc_spec = .FALSE.
+         l_attn_calc_spec = .FALSE.
+         ln_ice_wav_spec  = .FALSE.
+         ln_ice_wav_attn  = .FALSE.
+      ENDIF
 
    END SUBROUTINE ice_wav_init
 

@@ -83,6 +83,11 @@ MODULE sbcwave
    REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:)     ::   wfreq           !: Wave frequencies for discretised energy spectrum ('center' of bins)
    REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:)     ::   wfreq_u         !: Wave frequencies for discretised energy spectrum (upper limits of bins)
    REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:)     ::   wdfreq          !: Wave frequencies for discretised energy spectrum (bin widths)
+   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:)     ::   wlam_l          !: Wavelengths corresponding to wfreq_u
+   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:)     ::   wlam            !: Wavelengths corresponding to wfreq
+   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:)     ::   wlam_u          !: Wavelengths corresponding to wfreq_l
+   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:)     ::   wdlam           !: Wavelength bin widths
+   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:)     ::   wknum           !: Angular wavenumber corresponding to wfreq
    REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:,:) ::   wspec           !: Wave energy spectrum (function of frequency) at t-point
 !
    REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:,:)   ::   charn           !: charnock coefficient at t-point
@@ -475,7 +480,9 @@ CONTAINS
 
       !                !==  Set frequency arrays for wave energy spectrum  ==!
       !
-      ALLOCATE( wfreq_l(nn_nwfreq), wfreq(nn_nwfreq), wfreq_u(nn_nwfreq), wdfreq(nn_nwfreq) )
+      ALLOCATE( wfreq_l(nn_nwfreq), wfreq(nn_nwfreq), wfreq_u(nn_nwfreq), wdfreq(nn_nwfreq),   &
+         &      wlam_l (nn_nwfreq), wlam (nn_nwfreq), wlam_u (nn_nwfreq), wdlam (nn_nwfreq),   &
+         &      wknum  (nn_nwfreq))
       !
       IF( ln_wfreq_usr ) THEN
          !
@@ -514,6 +521,14 @@ CONTAINS
       ENDIF
 
       wdfreq(:) = wfreq_u(:) - wfreq_l(:)   ! width of frequency bins
+
+      ! Wavelengths corresponding to wfreq* arrays (note wlam* therefore are in decreasing order)
+      ! Assume dispersion relation for deep-water surface gravity waves:
+      wlam_l(:) = grav / (2._wp * rpi * wfreq_u(:)**2)
+      wlam  (:) = grav / (2._wp * rpi * wfreq  (:)**2)
+      wlam_u(:) = grav / (2._wp * rpi * wfreq_l(:)**2)
+      wdlam (:) = wlam_u(:) - wlam_l(:)
+      wknum (:) = 2._wp * rpi / wlam(:)   ! angular wavenumber
 
       IF(lwp) THEN
          WRITE(numout,*)

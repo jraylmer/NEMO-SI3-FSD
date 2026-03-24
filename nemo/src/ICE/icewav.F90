@@ -29,8 +29,10 @@ MODULE icewav
 
    USE par_ice           ! SI3 parameters
    USE phycst , ONLY :   rpi, grav, rhoi
-   USE sbc_oce, ONLY :   wndm, ln_wave, ln_wave_spec, nn_nwfreq   ! SBC module
-   USE sbcwave, ONLY :   hsw, wpf, wmp, wfreq, wdfreq, wspec      ! SBC: wave variables
+   USE sbc_oce, ONLY :   wndm, ln_wave, ln_wave_spec, nn_nwfreq            ! SBC module
+   USE sbcwave, ONLY :   hsw, wpf, wmp, wfreq, wfreq_l, wfreq_u, wdfreq,   &
+      &                                 wlam , wlam_l , wlam_u , wdlam ,   &
+      &                                 wknum, wspec                       ! SBC: wave variables
    USE ice               ! sea-ice: variables
    USE icefsd , ONLY :   a_ifsd, nf_newice, floe_rl, floe_rc, floe_ru, floe_dr   ! floe size distribution parameters/variables
    USE icefsd , ONLY :   rDt_ice_fsd, fsd_cleanup, ice_fsd_dia                   ! floe size distribution functions/routines
@@ -71,9 +73,9 @@ MODULE icewav
    PUBLIC ::   ice_wav_init     ! routine called by ice_init
 
    REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:)   ::   x1d         ! 1D subdomain for wave fracture in HT15 scheme
-   REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:)   ::   wknum       ! angular wave numbers corresponding to wfreq array (m-1)
-   REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:)   ::   wlam        ! wavelengths corresponding to wfreq array (m)
-   REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:,:) ::   Bfrac_uni   ! uniform fracture redistributor (Y24a scheme)
+   REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:,:) ::   Bfrac_uni   ! uniform fracture redistributor (Z16 and Y24a schemes)
+   REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:,:) ::   wgtQ_y24b   ! weight factor (Y24b scheme; Q term)
+   REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:,:) ::   wgtB_y24b   ! weight factor (Y24b scheme; B term)
    REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:,:) ::   stmer       ! meridional distance across T cells (m)
 
    INTEGER, PARAMETER ::   jpfrac_z16  = 1   ! option for nn_frac_scheme -> Zhang et al. (2016) scheme
@@ -688,6 +690,18 @@ CONTAINS
       !! ** Invokes :              [ice_wav_frac] -> wav_spec_bret()   (ln_ice_wav_spec = F AND ln_ice_wav_attn = F)
       !!                           [ice_wav_frac] -> rDt_ice_fsd()
       !!
+      !! ** Notes   :   ** On the computation of Bfrac and Qfrac for new fracture schemes
+      !!
+      !!                   Qfrac(jf) represents the floe-category mean fracture probability.
+      !!
+      !!                   In principle (depending on the assumptions of the chosen scheme), Bfrac is non-zero
+      !!                   along the diagonal because it is possible for floes to fracture into sizes in the same
+      !!                   category range. See ice_wav_init for explanation in terms of the uniform redistributor.
+      !!
+      !!                   A special case is the smallest floe size category, Bfrac(1,1), **which must always be 1**.
+      !!                   This is not enforced by this routine, but it ensures floes in the smallest category that
+      !!                   fracture [if Qfrac(1) /= 0] have a loss term always cancelled by its own gain term.
+      !!
       !! ** References
       !!    ----------
       !!    Horvat, C., & Tziperman, E. (2015).
@@ -724,18 +738,9 @@ CONTAINS
       ! Control:
       IF( ln_timing )   CALL timing_start('ice_wav_frac')
 
-      ! Calculate wavelength and angular wave number (2 * pi / wavelength) assuming dispersion
-      ! relation of surface deep water gravity waves (these arrays are constants, so calculate once.
-      ! Cannot do this in ice_wav_init as that is called before sbc_wave_init..)
-      !
-      ! ToDo: move this to sbc_wave_init?
-      !
       IF( kt == nit000 ) THEN   ! at first time-step
-         IF( nn_frac_scheme /= jpfrac_z16 ) THEN   ! frequencies undefined in this case!
-            ALLOCATE( wlam(nn_nwfreq), wknum(nn_nwfreq) )
-            wlam(:)  = grav / (2._wp * rpi * wfreq(:)**2)
-            wknum(:) = 2._wp * rpi / wlam(:)
-         ENDIF
+         ! Compute constant weight terms for Y24B fracture scheme:
+         IF( nn_frac_scheme == jpfrac_y24b ) CALL y24b_weights
       ENDIF
 
       za_ifsdb(A2D(0),:,:) = a_ifsd(A2D(0),:,:)   ! save a_ifsd before fracture for tendency diagnostics
@@ -799,7 +804,7 @@ CONTAINS
             ! Fracturing quantified by zQfrac is applied to each ice thickness category
             ! if possible (enough ice to begin with), in proportion to its concentration
             !
-            IF( MAXVAL(zQfrac(:)) > epsi10 ) THEN
+            IF( MAXVAL(zQfrac(1:)) > epsi10 ) THEN
                !--------------------------------------!
                ! Begin sub-loop: thickness categories !
                !--------------------------------------!
@@ -1093,6 +1098,115 @@ CONTAINS
    END SUBROUTINE wav_frac_y24a
 
 
+   SUBROUTINE y24b_weights
+      !!-------------------------------------------------------------------
+      !!                 ***  ROUTINE y24b_weights  ***
+      !!
+      !! ** Purpose :   Calculate 'weight' factors for Y24b wave fracture scheme.
+      !!                ** This routine should only be called once as these are constants **
+      !!
+      !! ** Method  :   'Weights' are a function of spectral class and floe size category and
+      !!                represent the sub-category--class fraction that satisfy the imposed
+      !!                conditions on wave fracture, which in Y24b are functions of wavelength
+      !!                and floe size only. In the actual scheme, local wave conditions are
+      !!                used to determine whether fracture actually could occur as a function
+      !!                of wavelength which, combined with these weights, determines the wave
+      !!                fracture source terms (see routines ice_wav_frac and wav_frac_y24b).
+      !!
+      !!                The formulae/conditions used below are not straightforward to explain
+      !!                in text... wgtQ_y24b represents the area fraction of the box dr by dL
+      !!                (floe size and wavelength category widths) satisfying 2r <= L, and
+      !!                wgtB_y24b is the fraction of the interval dL for which L/4 is contained
+      !!                by each floe size category. In most cases (well, for wgtQ_y24B) these are
+      !!                0 or 1, where the conditions are satisfied by none or all sub-category
+      !!                values of r and L. The remaining value are between 0 and 1 and the exact
+      !!                formula to calculate them depends on exactly how the category bounds
+      !!                geometrically line up with the relevant condition (2r <= L or r' = L/4).
+      !!
+      !! ** Outputs :   Allocates and calculates the private module variables: wgt{Q,B}_y24b
+      !!
+      !!-------------------------------------------------------------------
+      !
+      INTEGER ::   jf, jw, ierr   ! dummy loop indices and allocate status return value
+      !
+      !!-------------------------------------------------------------------
+
+      ALLOCATE( wgtQ_y24b(nn_nwfreq,nn_nfsd), wgtB_y24b(nn_nwfreq,nn_nfsd), STAT=ierr )
+      IF( ierr /= 0 ) CALL ctl_stop('icewav: unable to allocate wgt{Q,B}_y24b array(s)')
+
+      wgtQ_y24b(:,:) = 0._wp   ! initialise
+      wgtB_y24b(:,:) = 0._wp   ! default value (most of this array will = 0 anyway)
+
+      DO jw = 1, nn_nwfreq
+         DO jf = 1, nn_nfsd
+            !
+            ! --- Compute weights for Q(r) --- !
+            !
+            IF( wlam_u(jw) <= 2._wp * floe_rl(jf) ) THEN
+               ! => all wavelengths in class jw can fracture any floes in category jf
+               wgtQ_y24b(jw,jf) = 1._wp
+               !
+            ELSEIF( wlam_l(jw) >= 2._wp * floe_ru(jf) ) THEN
+               ! => no wavelengths in class jw can fracture any floes in category jf
+               wgtQ_y24b(jw,jf) = 0._wp
+               !
+            ELSE
+               ! => only some wavelength/floe size combinations sub-spectral class/
+               !    sub-floe size category can participate in fracture, so we have to work
+               !    out the fraction that can. Hard to explain where the following four expressions
+               !    come from in text... sketch out the various cases of a box of width/height
+               !    (dr,dL) overlapping the region L < 2*r, and get the area fraction of overlap...
+               !
+               IF( wlam_u(jw) >= 2._wp * floe_ru(jf) ) THEN
+                  IF( wlam_l(jw) < 2._wp * floe_rl(jf) ) THEN
+                     wgtQ_y24b(jw,jf) = (2._wp * floe_rl(jf) - wlam_l(jw) + floe_dr(jf)) / wdlam(jw)
+                  ELSE
+                     wgtQ_y24b(jw,jf) = .5_wp * (floe_ru(jf) - .5_wp * wlam_l(jw))   &
+                        &                     * (2._wp * floe_ru(jf) - wlam_l(jw))   &
+                        &                     / (floe_dr(jf) * wdlam(jw))
+                  ENDIF
+               ELSE   ! 2*floe_ru(jf) > wlam_u(jw)
+                  IF( wlam_l(jw) < 2._wp * floe_rl(jf) ) THEN
+                     wgtQ_y24b(jw,jf) = 1._wp - .5_wp * (.5_wp * wlam_u(jw) - floe_rl(jf))   &
+                        &                             * (wlam_u(jw) - 2._wp * floe_rl(jf))   &
+                        &                             / (floe_dr(jf) * wdlam(jw))
+                  ELSE
+                     wgtQ_y24b(jw,jf) = (floe_ru(jf) - .5_wp * wlam_u(jw) + .25_wp * wdlam(jw) ) / floe_dr(jf)
+                  ENDIF
+               ENDIF
+            ENDIF
+            !
+            ! --- Compute weights for B(r,r') --- !
+            ! Weight wgtB_y24b(jw,jf) represents fraction of wavelength interval jw for which
+            ! r' = L/4 is contained within the floe size category interval jf. Again these are
+            ! hard to explain, just have to sketch out the possible cases...
+            !
+            ! If first joint condition below is not satisfied, it means none of the range of
+            ! fracture sizes r' = L/4 for this spectral class jw fit into this floe size
+            ! category jf, so we do nothing (array initialised to 0 already)
+            !
+            IF( (wlam_u(jw) > 4._wp * floe_rl(jf)) .AND. (wlam_l(jw) < 4._wp * floe_ru(jf)) ) THEN
+               IF( wlam_u(jw) >= 4._wp * floe_ru(jf) ) THEN
+                  IF( wlam_l(jw) < 4._wp * floe_rl(jf) ) THEN
+                     wgtB_y24b(jw,jf) = 4._wp * floe_dr(jf) / wdlam(jw)
+                  ELSE
+                     wgtB_y24b(jw,jf) = (4._wp * floe_ru(jf) - wlam_l(jw)) / wdlam(jw)
+                  ENDIF
+               ELSE   ! 4*floe_ru(jf) > wlam_u(jw)
+                  IF( wlam_l(jw) < 4._wp * floe_rl(jf) ) THEN
+                     wgtB_y24b(jw,jf) = (wlam_u(jw) - 4._wp * floe_rl(jf)) / wdlam(jw)
+                  ELSE
+                     wgtB_y24b(jw,jf) = 1._wp
+                  ENDIF
+               ENDIF
+            ENDIF
+            !
+         ENDDO   ! jf (floe size category)
+      ENDDO   ! -- jw (spectral class)
+
+   END SUBROUTINE y24b_weights
+
+
    SUBROUTINE wav_frac_y24b( pwmp, pWspec, ph_i, pQfrac, pBfrac )
       !!-------------------------------------------------------------------
       !!                 *** ROUTINE wav_frac_y24b ***
@@ -1146,7 +1260,10 @@ CONTAINS
       !!                where Theta(x) = {1 if x >= 0; 0 otherwise}, delta(x) = {1 if x = 0; 0 otherwise},
       !!                and the integral is over all wavelengths L. In the code we just check the conditions
       !!                are met explicitly for each combination of s, r, and L rather than using the last
-      !!                formal equation.
+      !!                formal equation. Those are quantified by 'weights' variables, computed once in routine
+      !!                y24b_weights, as the conditions (1-2) between each spectral class/floe size
+      !!                category, which are 0, 1, or somewhere between (accounting for partial fulfillment
+      !!                of the conditions sub-category).
       !!
       !! ** Inputs  :   pwmp                    :   local wave mean period (s)
       !!                pWspec(nn_nwfreq)       :   local wave spectrum (spectral energy density; m2.Hz-1)
@@ -1194,35 +1311,25 @@ CONTAINS
       pBfrac(:,:) = 0._wp
 
       DO jf1 = 1, nn_nfsd
-         !
-         ! Calculate Q(s) <==> pQfrac(jf1):
          DO jw = 1, nn_nwfreq
-            ! Each spectral class can only break ice if wavelength L < initial floe diameter
-            ! Note: dL is already (implicitly) multiplied into zprob earlier:
-            IF( wlam(jw) < 2._wp * floe_rc(jf1) ) THEN
-               pQfrac(jf1) = pQfrac(jf1) + zprob(jw)
-            ENDIF
-         ENDDO
-         !
-         ! Calculate B(s,r)dr <==> pBfrac(jf1,jf2):
-         DO jf2 = 1, nn_nfsd
-            ! Each spectral class can only break ice if wavelength L < initial floe diameter
-            ! And it can only break ice into floes of diameter L/2
-            ! For the latter, we check fracture floe size is within the floe size category limits:
-            DO jw = 1, nn_nwfreq
-               IF(          (wlam(jw) < 2._wp * floe_rc(jf1) )   &
-                  &   .AND. (wlam(jw) / 4._wp >= floe_rl(jf2))   &
-                  &   .AND. (wlam(jw) / 4._wp <  floe_ru(jf2))   ) THEN
-                  !
-                  pBfrac(jf1,jf2) = pBfrac(jf1,jf2) + zprob(jw)
-               ENDIF
-            ENDDO
-            ! Recall pBfrac includes dr factor; pBfrac(jf1,jf2) <==> B(s,r)*dr:
-            pBfrac(jf1,jf2) = pBfrac(jf1,jf2) * floe_dr(jf2)
             !
+            ! Update Q(s) <==> pQfrac(jf1) (note dL is already implicitly multipled into zprob):
+            !
+            ! Weight factor wgtQ_y24b is fraction of spectral class jw/floe size category jf
+            ! for which the condition for fracture (wavelength L < 2r) is satisfied:
+            pQfrac(jf1) = pQfrac(jf1) + wgtQ_y24b(jw,jf1) * zprob(jw)
+            !
+            ! Update B(s,r)dr <== > pBfrac(jf1,jf2):
+            !
+            ! Weight factor wgtB_y24b is the fraction of spectral class jw width for which the
+            ! fracture size (r' = L/4) is contained within the transferred floe size category jf2:
+            DO jf2 = 1, nn_nfsd
+                pBfrac(jf1,jf2) = pBfrac(jf1,jf2) +   wgtQ_y24b(jw,jf1) * zprob(jw)      &
+                   &                                * wgtB_y24b(jw,jf2) * floe_dr(jf2)
+            ENDDO
          ENDDO
          !
-         ! Normalise:
+         ! Ensure B(s,r)dr is normalised (integrates to 1):
          IF( SUM(pBfrac(jf1,:)) > 0._wp ) pBfrac(jf1,:) = pBfrac(jf1,:) / SUM(pBfrac(jf1,:))
          !
       ENDDO
@@ -1476,23 +1583,23 @@ CONTAINS
 
          ! Calculate the probability (pQfrac) and redistribution (pBfrac) functions
          ! from the fracture distribution [zWfrac, which corresponds to rW(r)dr]:
-         !
-         DO jf = 2, nn_nfsd
-            ! B(s,r)dr = rW(r)dr / int[ r'W(r')dr' ] for r < s and r' < s
-            IF( SUM(zWfrac(1:jf-1)) > 0._wp ) THEN
-               pBfrac(jf,1:jf-1) = zWfrac(1:jf-1) / SUM(zWfrac(1:jf-1))
-            ENDIF
-         ENDDO
-         !
          DO jf = 1, nn_nfsd
             !
             ! Q(r) = 1/(D/2) * int[ r'W(r')dr' ] for r' < r:
-            pQfrac(jf) = 2._wp * SUM(zWfrac(1:jf-1)) / (x1d(nn_ht15_nx1d) - x1d(1))
             !
-            ! Divide B(s,r)dr calculated above by the integral/sum over r
-            ! This normalises it so that int[ B(s,r)dr ] = 1
-            ! (it should be anyway, but in case of discretisation errors this ensures it is so):
+            ! Floes can fracture into same category, so need to include up to jf, but weight it by 0.5
+            ! to account that not all fracture sizes represented by W(r)dr could have resulted from
+            ! fractures of floes in the same range [r,r+dr] (this is assuming a uniform distribution of
+            ! initial/fractured floes sub-category; unlike schemes Z16 and Y24* it is not possible to
+            ! do anything more accurately here)
             !
+            pQfrac(jf) = 2._wp * ( SUM(zWfrac(1:jf-1)) + .5_wp * zWfrac(jf) ) / (x1d(nn_ht15_nx1d) - x1d(1))
+            !
+            ! B(s,r)dr = rW(r)dr / int[ r'W(r')dr' ] for r < s, r' < s (no denominator; normalise below)
+            pBfrac(jf,1:jf-1) =         zWfrac(1:jf-1)
+            pBfrac(jf,jf    ) = .5_wp * zWfrac(jf    )   ! again, account for floes fracturing to same cat.
+
+            ! Normalise B (effectively account for denominator in equation):
             IF( SUM(pBfrac(jf,:)) > 0._wp ) pBfrac(jf,:) = pBfrac(jf,:) / SUM(pBfrac(jf,:))
             !
          ENDDO
@@ -1727,11 +1834,9 @@ CONTAINS
       !!
       !!-------------------------------------------------------------------
       !
-      INTEGER  ::   ji, jj, jf1, jf2, ji_glo, jj_glo   ! Dummy loop indices
+      INTEGER  ::   ji, jj, jf, ji_glo, jj_glo         ! Dummy loop indices
       INTEGER  ::   ierr                               ! Local integer output status for allocate
       INTEGER  ::   ios, ioptio                        ! Local integer output status for namelist read
-      !
-      REAL(wp) ::   zc1, zc2                           ! Terms for uniform fracture redistributor (Bfrac_uni)
       !
       !!
       NAMELIST/namwav/ ln_ice_wav     , ln_ice_wav_spec, rn_ice_wav_ecri, nn_frac_scheme,   &
@@ -1818,20 +1923,31 @@ CONTAINS
             !
             Bfrac_uni(:,:) = 0._wp
             !
-            zc1 = floe_rc(1) / floe_rc(nn_nfsd)   ! = rmin/rmax
-            zc2 = 1._wp - zc1
+            ! Note: we do not calculate this using formula given in Zhang et al. (2015, Eq. 14)
+            ! with cutoff values explicitly because we just assume full range of fractured floe
+            ! sizes are possible, which is what Z15, Z16, and Y24A schemes use anyway. Each
+            ! Bfrac_uni(jf,:) represents integration of uniform (i.e., constant) B over floe size
+            ! category ranges of the second index, so just needs to be scaled in proportion to the
+            ! category widths and then normalised at the end.
             !
-            DO jf1 = 1, nn_nfsd
-               DO jf2 = 1, nn_nfsd
-                  IF(          (zc1*floe_rc(jf1) <= floe_rc(jf2))          &
-                     &   .AND. (floe_rc(jf2) <= zc2*floe_rc(jf1)) ) THEN
-                     !
-                     Bfrac_uni(jf1,jf2) = floe_dr(jf2) / ((zc2 - zc1)*floe_rc(jf1))
-                  ENDIF
-               ENDDO
+            ! In general, B needs to be defined on the diagonal -- in principle, floes in category
+            ! jf *can* fracture into the same category jf as it represents a range of floe sizes.
+            ! In the uniform redistributor case this is obviously valid. The factor of 0.5 accounts
+            ! for the fact that not all sub-category floe sizes can result from a given initial
+            ! sub-category size in the same range (the 0.5 is intuitive but can also be shown
+            ! analytically in this case).
+            !
+            ! Particularly important: Bfrac(1,1) must always equal 1 (uniform and general case), so
+            ! that in the wave fracture equation the smallest category loss term, which can be non-
+            ! zero if Q(1) /= 0, always cancels with the corresponding gain term.
+            !
+            DO jf = 1, nn_nfsd
+               Bfrac_uni(jf,1:jf-1) =         floe_dr(1:jf-1)
+               Bfrac_uni(jf,jf    ) = .5_wp * floe_dr(jf    )
+               !
                ! Normalise so that integral of Bfrac_uni(r1,r2)*dr2 = 1:
-               IF( SUM(Bfrac_uni(jf1,:)) > 0._wp )   &
-                  &   Bfrac_uni(jf1,:) = Bfrac_uni(jf1,:) / SUM(Bfrac_uni(jf1,:))
+               IF( SUM(Bfrac_uni(jf,:)) > 0._wp )   &
+                  &   Bfrac_uni(jf,:) = Bfrac_uni(jf,:) / SUM(Bfrac_uni(jf,:))
                !
             ENDDO
             !

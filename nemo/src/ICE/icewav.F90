@@ -78,13 +78,20 @@ MODULE icewav
    REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:,:) ::   wgtB_y24b   ! weight factor (Y24b scheme; B term)
    REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:,:) ::   stmer       ! meridional distance across T cells (m)
 
-   INTEGER, PARAMETER ::   jpfrac_z16  = 1   ! option for nn_frac_scheme -> Zhang et al. (2016) scheme
-   INTEGER, PARAMETER ::   jpfrac_y24a = 2   ! option for nn_frac_scheme -> Yang et al. (2024) scheme A
-   INTEGER, PARAMETER ::   jpfrac_y24b = 3   ! option for nn_frac_scheme -> Yang et al. (2024) scheme B
-   INTEGER, PARAMETER ::   jpfrac_ht15 = 4   ! option for nn_frac_scheme -> Horvat and Tziperman (2015) scheme
+   INTEGER , PARAMETER ::   jpfrac_z16  = 1         ! option for nn_frac_scheme -> Zhang et al. (2016) scheme
+   INTEGER , PARAMETER ::   jpfrac_y24a = 2         ! option for nn_frac_scheme -> Yang et al. (2024) scheme A
+   INTEGER , PARAMETER ::   jpfrac_y24b = 3         ! option for nn_frac_scheme -> Yang et al. (2024) scheme B
+   INTEGER , PARAMETER ::   jpfrac_ht15 = 4         ! option for nn_frac_scheme -> Horvat and Tziperman (2015) scheme
 
    LOGICAL ::   l_attn_calc_spec   ! whether spectrum needs to be calculated in subroutine ice_wav_attn
    LOGICAL ::   l_frac_calc_spec   ! whether spectrum needs to be calculated in subroutine ice_wav_frac
+
+   ! General thresholds on wave parameters to compute wave spectra and/or trigger breakup events, where needed:
+   ! (routines can use individual values but helpful to have some global 'defaults' for consistency):
+   REAL(wp), PARAMETER ::   minhsw      = .01_wp    ! threshold minimum sig. wave height (m)
+   REAL(wp), PARAMETER ::   minwpf      = .001_wp   ! threshold minimum peak frequency (Hz)
+   REAL(wp), PARAMETER ::   minwmp      = .01_wp    ! threshold minimum wave mean period (s)
+   REAL(wp), PARAMETER ::   minwspec    = epsi06    ! threshold minimum max. of wave spectrum (m2.Hz-1)
 
    ! Global-domain arrays needed for attenuation (ice_wav_attn) -- which also must be 'global' in module scope:
    REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:,:)   ::   glamt_glo   ! T-grid longitude (degrees east)
@@ -245,6 +252,8 @@ CONTAINS
       !
       !!-------------------------------------------------------------------
 
+      ! Do not need as strict condition on hsw or wpf as in global module variables minhsw, minwpf
+      ! (just need to make sure we avoid division by zero):
       IF( (nn_frac_scheme == jpfrac_z16) .OR. (phsw < epsi06) .OR. (pwpf < epsi06) ) THEN
          !
          kcat = nf_newice   ! no waves present => set to default new floe size category
@@ -316,15 +325,15 @@ CONTAINS
       !!
       !!                1.   Calculate the attenuation exponents, Nk * a(hk,f), for all ice covered grid
       !!                     cells, and (if necessary, according to module flag l_attn_calc_spec) the
-      !!                     wave spectrum from significant wave height/peak frequency inputs in all
-      !!                     grid cells.
+      !!                     wave spectrum from significant wave height/peak frequency inputs at open
+      !!                     ocean (source) grid cells.
       !!
       !!                2.   Copy these terms into global-domain, global (i.e., module scope) arrays. This
       !!                     is necessary because for any given target grid cell the source grid cell may
       !!                     be in a different computational subdomain, so all values must be available to
       !!                     all subdomains before step 3. A call to lib_mpp routine mppsync (a wrapper for
       !!                     MPP_BARRIER) ensures this is possible. Similar global arrays are required for
-      !!                     the grid cell longitude and latitudes, but these are compute in advance, in
+      !!                     the grid cell longitude and latitudes, but these are computed in advance, in
       !!                     subroutine ice_wav_init.
       !!
       !!                3.   For each target grid cell (in the computational subdomain), search for the
@@ -340,8 +349,8 @@ CONTAINS
       !! ** Callers :   ice_stp --> [ice_wav_attn]
       !! ** Calls   :               [ice_wav_attn] --> mppsync
       !!                                           --> lbc_lnk
+      !!                                           --> wav_spec_bret
       !!                                           --> ice_wav_calc
-      !! ** Invokes :               [ice_wav_attn] --> wav_spec_bret()
       !!
       !! ** Notes   :   This routine is only called when ln_ice_wav_attn=T. It either uses the wave spectrum
       !!                in the nearest open ocean if available (ln_wave_spec=T, ln_ice_wav_spec=T), otherwise
@@ -383,7 +392,6 @@ CONTAINS
       !
       REAL(wp), PARAMETER ::   zf_noice = -1._wp       ! dummy flag value < 0        for ice-free ocean grid cell
       REAL(wp), PARAMETER ::   zf_land  = -2._wp       ! dummy flag value < zf_noice for land grid cell
-      REAL(wp), PARAMETER ::   zhsw_min = .01_wp       ! minimum sig. wave height to calculate local spectrum at source cells
       !
       !!-------------------------------------------------------------------
 
@@ -436,7 +444,7 @@ CONTAINS
                !
             ENDDO
 
-            ! Wave spectrum: force to be zero under ice (we will either calculate it below,
+            ! Wave spectrum: force to be zero under ice (we will either calculate it in step 3,
             ! or there will be no 'source' wave data in which case this needs to be left as zero):
             wspec(ji,jj,:) = 0._wp
 
@@ -449,13 +457,8 @@ CONTAINS
             ! Set wave spectrum for this open-ocean grid cell if needed:
             !    if reading spectrum from file/model, then l_attn_calc_spec=F => do nothing
             !    otherwise, calculate from hsw and wpf, but only if hsw is large enough:
-            IF( l_attn_calc_spec ) THEN
-               IF( hsw(ji,jj) >= zhsw_min ) THEN
-                  wspec(ji,jj,:) = wav_spec_bret( hsw(ji,jj), wpf(ji,jj) )
-               ELSE
-                  wspec(ji,jj,:) = 0._wp
-               ENDIF
-            ENDIF
+            IF( l_attn_calc_spec ) CALL wav_spec_bret( hsw(ji,jj), wpf(ji,jj), wspec(ji,jj,:) )
+            !
          ENDIF
 
          ! ======================================================== !
@@ -613,22 +616,24 @@ CONTAINS
       !
       !!-------------------------------------------------------------------
 
-      ! Moments of the wave spectrum:
-      zm0 = SUM(            pwspec(:) * wdfreq(:) )
-      zm1 = SUM( wfreq(:) * pwspec(:) * wdfreq(:) )
+      IF( MAXVAL(pwspec(:)) >= minwspec ) THEN
+         ! Moments of the wave spectrum:
+         zm0 = SUM(            pwspec(:) * wdfreq(:) )
+         zm1 = SUM( wfreq(:) * pwspec(:) * wdfreq(:) )
 
-      ! Significant wave height:
-      phsw = 4._wp * SQRT( zm0 )
+         ! Significant wave height:
+         phsw = 4._wp * SQRT( zm0 )
 
-      ! Wave peak frequency:
-      imax = MAXLOC(pwspec(:), DIM=1)
-      pwpf = wfreq(imax)
+         ! Wave peak frequency:
+         imax = MAXLOC(pwspec(:), DIM=1)
+         pwpf = wfreq(imax)
 
-      ! Wave mean period:
-      IF( zm1 > 0._wp ) THEN
+         ! Wave mean period:
          pwmp = zm0 / zm1
       ELSE
+         phsw = 0._wp
          pwmp = 0._wp
+         pwpf = 0._wp
       ENDIF
 
    END SUBROUTINE ice_wav_calc
@@ -760,7 +765,7 @@ CONTAINS
             ! (1) Calculate wave spectrum, if needed. Condition depends on combination of various
             ! namelist flags; the net condition is saved in module variable l_frac_calc_spec
             !
-            IF( l_frac_calc_spec ) wspec(ji,jj,:) = wav_spec_bret( hsw(ji,jj), wpf(ji,jj) )
+            IF( l_frac_calc_spec ) CALL wav_spec_bret( hsw(ji,jj), wpf(ji,jj), wspec(ji,jj,:) )
 
             ! (2) Calculate source terms for the wave fracture equation
             !     This depends on the fracture scheme selected
@@ -786,7 +791,7 @@ CONTAINS
                   !
                   ! Do not do this calculation if local wave spectrum is too weak
                   ! (note: other schemes are much cheaper so similar checks not needed):
-                  IF( MAXVAL( wspec(ji,jj,:) ) > epsi06 ) THEN
+                  IF( MAXVAL( wspec(ji,jj,:) ) >= minwspec ) THEN
                      CALL wav_frac_ht15( wspec(ji,jj,:), zh_i, zQfrac(:), zBfrac(:,:) )
                   ELSE
                      zQfrac(:)   = 0._wp
@@ -1085,12 +1090,13 @@ CONTAINS
 
       pQfrac(:) = 0._wp   ! reset/initialise, and return value if critical strain not exceeded
 
-      zstrain = 2.5_wp * rpi**4 * ph_i * phsw / (grav**2 * pwmp**4)
-
-      IF( zstrain >= rn_ice_wav_ecri ) THEN
-         DO jf = 1, nn_nfsd
-            pQfrac(jf) = rn_y24a_cw * EXP( -rn_y24a_alpha * (1._wp - floe_rc(jf) / floe_rc(nn_nfsd)) )
-         ENDDO
+      IF( (phsw >= minhsw) .AND. (pwmp >= minwmp) ) THEN                 ! <-- sufficient wave presence
+         zstrain = 2.5_wp * rpi**4 * ph_i * phsw / (grav**2 * pwmp**4)   ! <-- strain experienced by ice
+         IF( zstrain >= rn_ice_wav_ecri ) THEN
+            DO jf = 1, nn_nfsd
+               pQfrac(jf) = rn_y24a_cw * EXP( -rn_y24a_alpha * (1._wp - floe_rc(jf) / floe_rc(nn_nfsd)) )
+            ENDDO
+         ENDIF
       ENDIF
 
       pBfrac(:,:) = Bfrac_uni(:,:)   ! uniform redistribution
@@ -1301,7 +1307,8 @@ CONTAINS
 
       zamp    = SQRT( 2._wp * pWspec(:) * wdfreq(:) )            ! spectral amplitudes (m)
       zstrain = 2._wp * rpi**2 * ph_i * zamp(:) / (wlam(:)**2)   ! ice strain per spectral class
-      zprayl  = wav_spec_rayl( pwmp )                            ! local Rayleigh spectrum (Hz-1)
+
+      CALL wav_spec_rayl( pwmp, zprayl(:) )                      ! calculate local Rayleigh spectrum (Hz-1)
 
       ! Probability of waves of each frequency class resulting in fracture:
       zprob(:) = 0._wp
@@ -1612,9 +1619,9 @@ CONTAINS
    END SUBROUTINE wav_frac_ht15
 
 
-   FUNCTION wav_spec_bret( phsw_l, pwpf_l )
+   SUBROUTINE wav_spec_bret( phsw_l, pwpf_l, pwspec_l )
       !!-------------------------------------------------------------------
-      !!                *** FUNCTION wav_spec_bret ***
+      !!                *** ROUTINE wav_spec_bret ***
       !!-------------------------------------------------------------------
       !!
       !! ** Purpose :   Estimate local wave energy spectrum from local wave properties
@@ -1627,10 +1634,10 @@ CONTAINS
       !!                Bretschneider wave energy spectrum (a.k.a., power spectral density)
       !!                and has units of m2.Hz-1 (i.e., m2.s).
       !!
-      !! ** Inputs  :   phsw_l :   local significant wave height (m)
-      !!                pwpf_l :   local peak frequency (Hz)
+      !! ** Inputs  :   phsw_l  :   local significant wave height (m)
+      !!                pwpf_l  :   local peak frequency (Hz)
       !!
-      !! ** Outputs :   local wave energy spectrum (Bretschneider; m2.Hz-1)
+      !! ** Outputs :   pwspec_l:   local wave energy spectrum (Bretschneider; m2.Hz-1)
       !!
       !! ** Notes   :   The approach of using the Bretschneider formula to estimate the wave spectrum
       !!                for wave-ice interactions follows Horvat and Tziperman (2015) and Roach et al. (2018)
@@ -1639,8 +1646,8 @@ CONTAINS
       !!                of angular frequency, w = 2*pi*f, using SB(w)dw = SB(w)(dw/df)df = 2*pi*SB(w)df,
       !!                hence SB(f) = 2*pi*SB(w). This form can be traced back to Bretschneider (1959).
       !!
-      !! ** Invokers:   ice_wav_frac  --> [wav_spec_bret()]   (ln_ice_wav_spec=F AND ln_ice_wav_attn=F)
-      !!                wav_attn_spec --> [wav_spec_bret()]   (ln_ice_wav_spec=F AND ln_ice_wav_attn=T)
+      !! ** Callers :   ice_wav_frac  --> [wav_spec_bret]   (ln_ice_wav_spec=F AND ln_ice_wav_attn=F)
+      !!                wav_attn_spec --> [wav_spec_bret]   (ln_ice_wav_spec=F AND ln_ice_wav_attn=T)
       !!
       !! ** References
       !!    ----------
@@ -1662,21 +1669,24 @@ CONTAINS
       !!
       !!-------------------------------------------------------------------
       !
-      REAL(wp), INTENT(in)           ::   phsw_l          ! local significant wave height (m)
-      REAL(wp), INTENT(in)           ::   pwpf_l          ! local peak frequency (Hz)
-      !
-      REAL(wp), DIMENSION(nn_nwfreq) ::   wav_spec_bret   ! local wave energy spectrum (m2.Hz-1)
+      REAL(wp)                      , INTENT(in)    ::   phsw_l     ! local significant wave height (m)
+      REAL(wp)                      , INTENT(in)    ::   pwpf_l     ! local peak frequency (Hz)
+      REAL(wp), DIMENSION(nn_nwfreq), INTENT(inout) ::   pwspec_l   ! local wave energy spectrum (m2.Hz-1)
       !
       !!-------------------------------------------------------------------
 
-      wav_spec_bret(:) = .3125_wp * phsw_l**2 * pwpf_l**4 * EXP( -1.25_wp * ( pwpf_l / wfreq(:) )**4 ) / wfreq(:)**5
+      IF( (phsw_l >= minhsw) .AND. (pwpf_l >= minwpf) ) THEN
+         pwspec_l(:) = .3125_wp * phsw_l**2 * pwpf_l**4 * EXP( -1.25_wp * ( pwpf_l / wfreq(:) )**4 ) / wfreq(:)**5
+      ELSE
+         pwspec_l(:) = 0._wp
+      ENDIF
 
-   END FUNCTION wav_spec_bret
+   END SUBROUTINE wav_spec_bret
 
 
-   FUNCTION wav_spec_rayl( pwmp_l )
+   SUBROUTINE wav_spec_rayl( pwmp_l, prayl_l )
       !!-------------------------------------------------------------------
-      !!                *** FUNCTION wav_spec_rayl ***
+      !!                *** ROUTINE wav_spec_rayl ***
       !!-------------------------------------------------------------------
       !!
       !! ** Purpose :   Calculate local Rayleigh spectrum P(f)
@@ -1686,9 +1696,8 @@ CONTAINS
       !!                where f is frequency and T_m is mean wave period. The equation
       !!                is normalised so that that the integral of P over all f is 1.
       !!
-      !! ** Inputs  :   pwmp_l : local wave mean period
-      !!
-      !! ** Outputs :   local Rayleigh spectrum of frequencies, P(f) (Hz-1)
+      !! ** Inputs  :   pwmp_l  : local wave mean period
+      !! ** Outputs :   prayl_l : local Rayleigh spectrum of frequencies, P(f) (Hz-1)
       !!
       !! ** Notes   :   The Rayleigh spectrum is usually expressed in terms of period, but wave-ice
       !!                fracture is implemented using frequency for all spectra so here it has been
@@ -1702,7 +1711,7 @@ CONTAINS
       !!                they used Bretschneider's Eq. 3.34 by mistake, which expresses the Rayleigh
       !!                spectrum in standard form, i.e., in terms of tau = T/T_m).
       !!
-      !! ** Invokers:   wav_frac_y24b  --> [wav_spec_rayl()]   (nn_frac_scheme == jpfrac_y24b)
+      !! ** Callers :   wav_frac_y24b  --> [wav_spec_rayl]   (nn_frac_scheme == jpfrac_y24b)
       !!
       !! ** References
       !!    ----------
@@ -1716,19 +1725,23 @@ CONTAINS
       !!
       !!-------------------------------------------------------------------
       !
-      REAL(wp), INTENT(in)           ::   pwmp_l             ! local wave mean period (s)
-      REAL(wp), DIMENSION(nn_nwfreq) ::   wav_spec_rayl      ! local Rayleigh spectrum P(f) (Hz-1)
+      REAL(wp)                      , INTENT(in)    ::   pwmp_l    ! local wave mean period (s)
+      REAL(wp), DIMENSION(nn_nwfreq), INTENT(inout) ::   prayl_l   ! local Rayleigh spectrum P(f) (Hz-1)
       !
       !!-------------------------------------------------------------------
 
-      wav_spec_rayl(:) = 2.7_wp * EXP( -.675_wp / (pwmp_l * wfreq(:))**4 ) / (pwmp_l**4 * wfreq(:)**5)
+      IF( pwmp_l >= minwmp ) THEN
+         prayl_l(:) = 2.7_wp * EXP( -.675_wp / (pwmp_l * wfreq(:))**4 ) / (pwmp_l**4 * wfreq(:)**5)
 
-      ! Normalise (equation is normalised in theory, but discretisation leads to errors):
-      IF( SUM(wav_spec_rayl(:) * wdfreq(:) ) > 0._wp ) THEN
-         wav_spec_rayl(:) = wav_spec_rayl(:) / SUM( wav_spec_rayl(:) * wdfreq(:) )
+         ! Normalise (equation is normalised in theory, but discretisation leads to errors):
+         IF( SUM(prayl_l(:) * wdfreq(:) ) > 0._wp ) THEN
+            prayl_l(:) = prayl_l(:) / SUM( prayl_l(:) * wdfreq(:) )
+         ENDIF
+      ELSE
+         prayl_l(:) = 0._wp
       ENDIF
 
-   END FUNCTION wav_spec_rayl
+   END SUBROUTINE wav_spec_rayl
 
 
    SUBROUTINE wav_calc_stmer

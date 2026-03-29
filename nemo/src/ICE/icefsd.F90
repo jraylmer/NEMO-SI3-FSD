@@ -1077,13 +1077,13 @@ CONTAINS
       !! ** Purpose :   Creates the FSD category boundaries and related arrays
       !!
       !! ** Method  :   Determines FSD category boundaries from namelist
-      !!                parameter nn_nfsd. The actual boundaries are hard-
-      !!                coded for specific values of nn_nfsd = 24, 16, 12, or
-      !!                1, since this is how it is done in CICE/Icepack. But
-      !!                this could be changed in the future.
+      !!                parameter nn_nfsd. The actual boundaries are hard-coded for now
+      !!                (using the same values from CICE/Icepack; this will be changed
+      !!                to a more flexible set of options later).
+      !!
       !!-------------------------------------------------------------------
       !
-      REAL(wp), ALLOCATABLE, DIMENSION(:) ::   zlims   ! floe size category limits
+      REAL(wp), DIMENSION(25) ::   zlims   ! floe size category limits
       !
       REAL(wp) ::   zfloe_aweld     ! area of two welded floes (for computing floe_iweld)
       INTEGER  ::   jf1, jf2, jf3   ! dummy loop indices
@@ -1096,57 +1096,23 @@ CONTAINS
       ! same limits. Note that, except when nn_nfsd = 1, increasing nn_nfsd
       ! only adds larger floe size categories (i.e., smallest floe categories
       ! are the same):
-      IF (nn_nfsd == 24) THEN
+      zlims = (/ 6.65000000e-02_wp, 5.31030847e+00_wp, 1.42865861e+01_wp, 2.90576686e+01_wp,   &
+         &       5.24122136e+01_wp, 8.78691405e+01_wp, 1.39518470e+02_wp, 2.11635752e+02_wp,   &
+         &       3.08037274e+02_wp, 4.31203059e+02_wp, 5.81277225e+02_wp, 7.55141047e+02_wp,   &
+         &       9.45812834e+02_wp, 1.34354446e+03_wp, 1.82265364e+03_wp, 2.47261361e+03_wp,   &
+         &       3.35434988e+03_wp, 4.55051413e+03_wp, 6.17323164e+03_wp, 8.37461170e+03_wp,   &
+         &       1.13610059e+04_wp, 1.54123510e+04_wp, 2.09084095e+04_wp, 2.83643675e+04_wp,   &
+         &       3.84791270e+04_wp /)
 
-         ALLOCATE(zlims(25))
-
-         zlims = (/ 6.65000000e-02_wp, 5.31030847e+00_wp, 1.42865861e+01_wp,   &
-            &       2.90576686e+01_wp, 5.24122136e+01_wp, 8.78691405e+01_wp,   &
-            &       1.39518470e+02_wp, 2.11635752e+02_wp, 3.08037274e+02_wp,   &
-            &       4.31203059e+02_wp, 5.81277225e+02_wp, 7.55141047e+02_wp,   &
-            &       9.45812834e+02_wp, 1.34354446e+03_wp, 1.82265364e+03_wp,   &
-            &       2.47261361e+03_wp, 3.35434988e+03_wp, 4.55051413e+03_wp,   &
-            &       6.17323164e+03_wp, 8.37461170e+03_wp, 1.13610059e+04_wp,   &
-            &       1.54123510e+04_wp, 2.09084095e+04_wp, 2.83643675e+04_wp,   &
-            &       3.84791270e+04_wp /)
-
-      ELSEIF (nn_nfsd == 16) THEN
-
-         ALLOCATE(zlims(17))
-
-         zlims = (/ 6.65000000e-02_wp, 5.31030847e+00_wp, 1.42865861e+01_wp,   &
-            &       2.90576686e+01_wp, 5.24122136e+01_wp, 8.78691405e+01_wp,   &
-            &       1.39518470e+02_wp, 2.11635752e+02_wp, 3.08037274e+02_wp,   &
-            &       4.31203059e+02_wp, 5.81277225e+02_wp, 7.55141047e+02_wp,   &
-            &       9.45812834e+02_wp, 1.34354446e+03_wp, 1.82265364e+03_wp,   &
-            &       2.47261361e+03_wp, 3.35434988e+03_wp /)
-
-      ELSEIF (nn_nfsd == 12) THEN
-
-         ALLOCATE(zlims(13))
-
-         zlims = (/ 6.65000000e-02_wp, 5.31030847e+00_wp, 1.42865861e+01_wp,   &
-            &       2.90576686e+01_wp, 5.24122136e+01_wp, 8.78691405e+01_wp,   &
-            &       1.39518470e+02_wp, 2.11635752e+02_wp, 3.08037274e+02_wp,   &
-            &       4.31203059e+02_wp, 5.81277225e+02_wp, 7.55141047e+02_wp,   &
-            &       9.45812834e+02_wp /)
-
-      ELSEIF (nn_nfsd == 1) THEN
-
-         ALLOCATE(zlims(2))
-
-         zlims = (/ 6.65000000e-02_wp, 3.0e+02_wp /)
-
+      IF((nn_nfsd > 24) .OR. (nn_nfsd < 1)) THEN
+         CALL ctl_stop('fsd_init_bounds: number of floe size categories: need 2 <= nn_nfsd <= 24')
       ELSE
-         CALL ctl_stop('fsd_init_bounds: floe size categories not defined ',   &
-            &          'for specified value of nn_nfsd')
+         ALLOCATE(floe_rl(nn_nfsd), floe_rc(nn_nfsd), floe_ru(nn_nfsd), floe_dr(nn_nfsd),   &
+            &     floe_al(nn_nfsd), floe_ac(nn_nfsd), floe_au(nn_nfsd),                     &
+            &     floe_dlog_rc(nn_nfsd-1), floe_iweld(nn_nfsd, nn_nfsd), STAT=ierr)
+
+         IF (ierr /= 0) CALL ctl_stop('fsd_init_bounds: could not allocate FSD radii/area arrays')
       ENDIF
-
-      ALLOCATE(floe_rl(nn_nfsd), floe_rc(nn_nfsd), floe_ru(nn_nfsd), floe_dr(nn_nfsd),   &
-         &     floe_al(nn_nfsd), floe_ac(nn_nfsd), floe_au(nn_nfsd),                     &
-         &     floe_dlog_rc(nn_nfsd-1), floe_iweld(nn_nfsd, nn_nfsd), STAT=ierr)
-
-      IF (ierr /= 0) CALL ctl_stop('fsd_init_bounds: could not allocate FSD radii/area arrays')
 
       floe_rl = zlims(1:nn_nfsd)
       floe_ru = zlims(2:nn_nfsd+1)
@@ -1198,8 +1164,6 @@ CONTAINS
       DO jf1 = 1, nn_nfsd-1
          floe_dlog_rc(jf1) = LOG(floe_rc(jf1+1)) - LOG(floe_rc(jf1))
       ENDDO
-
-      IF (ALLOCATED(zlims)) DEALLOCATE(zlims)
 
    END SUBROUTINE fsd_initbounds
 

@@ -116,7 +116,7 @@ CONTAINS
 #if defined key_xios
       !
       TYPE(xios_duration) :: dtime    = xios_duration(0, 0, 0, 0, 0, 0)
-      TYPE(xios_date)     :: start_date
+      TYPE(xios_date)     :: start_date, ref_date
       CHARACTER(len=lc) :: clname, cltmpn
       INTEGER             :: irefyear, irefmonth, irefday
       INTEGER           :: ji
@@ -159,18 +159,16 @@ CONTAINS
 
       llrst_context = llrstr .OR. llrstw
 
-      ! Calendar type is now defined in xml file
-      IF (.NOT.(xios_getvar('ref_year' ,irefyear ))) irefyear  = 1900
-      IF (.NOT.(xios_getvar('ref_month',irefmonth))) irefmonth = 01
-      IF (.NOT.(xios_getvar('ref_day'  ,irefday  ))) irefday   = 01
-
-      SELECT CASE ( nleapy )        ! Choose calendar for IOIPSL
-      CASE ( 1)   ;   CALL xios_define_calendar( TYPE = "Gregorian", time_origin = xios_date(irefyear,irefmonth,irefday,0,0,0),   &
-          &                                                          start_date  = xios_date(   nyear,   nmonth,   nday,0,0,0) )
-      CASE ( 0)   ;   CALL xios_define_calendar( TYPE = "NoLeap"   , time_origin = xios_date(irefyear,irefmonth,irefday,0,0,0),   &
-          &                                                          start_date  = xios_date(   nyear,   nmonth,   nday,0,0,0) )
-      CASE (30)   ;   CALL xios_define_calendar( TYPE = "D360"     , time_origin = xios_date(irefyear,irefmonth,irefday,0,0,0),   &
-          &                                                          start_date  = xios_date(   nyear,   nmonth,   nday,0,0,0) )
+      ! Origin of time axis, start time, and calendar type
+      IF( .NOT. ( xios_getvar( 'ref_year',  irefyear  ) ) ) irefyear  = 1900
+      IF( .NOT. ( xios_getvar( 'ref_month', irefmonth ) ) ) irefmonth = 01
+      IF( .NOT. ( xios_getvar( 'ref_day',   irefday   ) ) ) irefday   = 01
+      ref_date   = xios_date( irefyear, irefmonth, irefday, 0,      0,        0 )
+      start_date = xios_date( nyear,    nmonth,    nday,    nhour0, nminute0, 0 )
+      SELECT CASE ( nleapy )
+      CASE ( 1)   ;   CALL xios_define_calendar( TYPE = "Gregorian", time_origin = ref_date, start_date = start_date )
+      CASE ( 0)   ;   CALL xios_define_calendar( TYPE = "NoLeap",    time_origin = ref_date, start_date = start_date )
+      CASE (30)   ;   CALL xios_define_calendar( TYPE = "D360",      time_origin = ref_date, start_date = start_date )
       END SELECT
 
       ! horizontal grid definition
@@ -2249,9 +2247,14 @@ CONTAINS
 #endif
             CALL xios_set_domain_attr( cldom, ni_glo = ni_glo, nj_glo = nj_glo, ibegin = ibegin, jbegin = jbegin, ni = ni, nj = nj,   &
                &    lonvalue_1D = lonvalue, latvalue_1D = latvalue, bounds_lon_1D = bounds_lon, bounds_lat_1D = bounds_lat,           &
+#if defined key_xios3
+               &    mask_1D = mask_1D, nvertex = nvertex, area_2d = area, TYPE = 'curvilinear', data_dim = data_dim )
+#else
                &    mask_1D = mask_1D, nvertex = nvertex, area = area, TYPE = 'curvilinear', data_dim = data_dim )
+#endif
 
             IF( lldogrd ) THEN                                            ! add new grid definitions
+               ! 2D grid (not representing any particular vertical level)
                clgrd = TRIM(cdid)//'_2D'//clsfx(jn)                       ! new 2D grid name
                IF( .NOT. xios_is_valid_grid(clgrd) ) THEN                 ! if not already defined
                   CALL xios_add_child( gridgroup_hdl, grid_hdl, clgrd )       ! add a new 2D grid to grid_definition
@@ -2259,6 +2262,18 @@ CONTAINS
                   CALL xios_set_domain_attr( clgrd, domain_ref = cldom )      ! link this new domain to cldom
                   CALL xios_set_domain_attr( clgrd, name = cdid )             ! force the name to avoid duplicated dimension names
                ENDIF
+
+               ! Surface grid (2D grid representing the surface specifically)
+               clgrd = TRIM(cdid)//'_sfc'//clsfx(jn)                      ! new surface grid name
+               IF( .NOT. xios_is_valid_grid(clgrd) ) THEN                 ! if not already defined
+                  CALL xios_add_child( gridgroup_hdl, grid_hdl, clgrd )       ! add a new surface grid to grid_definition
+                  CALL xios_add_child( grid_hdl, domain_hdl, clgrd )          ! add a new domain
+                  CALL xios_set_domain_attr( clgrd, domain_ref = cldom )      ! link this new domain to cldom
+                  CALL xios_set_domain_attr( clgrd, name = cdid )             ! force the name to avoid duplicated dimension names
+               ENDIF
+               IF( PRESENT(mask_3D) )   CALL xios_set_grid_attr( clgrd, mask_2D = mask_3D(:,:,1) )
+
+               ! 3D grid
                clgrd = TRIM(cdid)//'_3D'//clsfx(jn)                       ! new 3D grid name
                IF( .NOT. xios_is_valid_grid(clgrd) ) THEN                 ! if not already defined
                   CALL xios_add_child( gridgroup_hdl, grid_hdl, clgrd )       ! add a new 3D grid to grid_definition
@@ -2396,7 +2411,7 @@ CONTAINS
             cldom = TRIM(cddom)//csfx(jn)
             CALL xios_add_child( grid_hdl, domain_hdl, clgrd )          ! add a new domain
             CALL xios_set_domain_attr( clgrd, domain_ref = cldom )      ! link this new domain to cldom
-            CALL xios_set_domain_attr( clgrd, name = cldom )            ! force the name to avoid duplicated dimension names
+            CALL xios_set_domain_attr( clgrd, name = cddom )            ! force the name to avoid duplicated dimension names
             DO ja = 1, iax
                CALL xios_add_child( grid_hdl, axis_hdl, clgrd)          ! add a new axis
                CALL xios_set_axis_attr( clgrd, axis_ref = cdaxe(ja) )   ! link this new axis to cdaxe(ja)
@@ -2570,8 +2585,11 @@ CONTAINS
                          zmask(:,:,1    ) = tmask(Nis0:Nie0, Njs0:Nje0,1)
          END SELECT
          !
-         CALL iom_set_domain_attr( "grid_"//cdgrd, mask_1D = RESHAPE(zmask(:,:,1),(/Ni_0*Nj_0    /)) /= 0.   &
-            &                                    , mask_3D = RESHAPE(zmask(:,:,:),(/Ni_0,Nj_0,jpk/)) /= 0. )
+         ! The 2D domain mask (mask_1D) is applied to all levels and the 3D grid mask (mask_3D) is combined with this.
+         ! mask_1D is therefore treated as a 'default' mask, valid wherever we have any ocean points in the column (to account
+         ! for ISF cavities). mask_3D then provides an accurate mask for the grid.
+         CALL iom_set_domain_attr( "grid_"//cdgrd, mask_1D = RESHAPE(MAXVAL(zmask(:,:,:), DIM=3 ),(/Ni_0*Nj_0    /)) /= 0.   &
+            &                                    , mask_3D = RESHAPE(       zmask(:,:,:)         ,(/Ni_0,Nj_0,jpk/)) /= 0. )
       ENDIF
       !
    END SUBROUTINE set_grid

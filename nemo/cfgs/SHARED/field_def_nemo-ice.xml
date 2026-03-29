@@ -17,7 +17,7 @@
   <field_group id="SBC" > <!-- time step automaticaly defined based on nn_fsbc -->
 
     <!-- 2D variables -->
-    <field_group id="SBC_2D" grid_ref="grid_T_2D_inner" >
+    <field_group id="SBC_2D" grid_ref="grid_T_sfc_inner" >
 
       <!-- =================== -->
       <!-- standard ice fields -->
@@ -84,8 +84,8 @@
       <field id="icesalm"      long_name="Mass of salt in sea ice per area"                        standard_name="sea_ice_salt_mass"                         unit="kg/m2" />
 
       <!-- momentum (rheology) -->
-      <field id="uice"         long_name="X-component of sea ice velocity"                         standard_name="sea_ice_x_velocity"                        unit="m/s" grid_ref="grid_T_2D" />
-      <field id="vice"         long_name="Y-component of sea ice velocity"                         standard_name="sea_ice_y_velocity"                        unit="m/s" grid_ref="grid_T_2D" />
+      <field id="uice"         long_name="X-component of sea ice velocity"                         standard_name="sea_ice_x_velocity"                        unit="m/s" grid_ref="grid_T_sfc" />
+      <field id="vice"         long_name="Y-component of sea ice velocity"                         standard_name="sea_ice_y_velocity"                        unit="m/s" grid_ref="grid_T_sfc" />
       <field id="icevel"       long_name="Sea-ice speed"                                           standard_name="sea_ice_speed"                             unit="m/s"  />
       <field id="utau_ai"      long_name="X-component of atmospheric stress on sea ice"            standard_name="surface_downward_x_stress"                 unit="N/m2" />
       <field id="vtau_ai"      long_name="Y-component of atmospheric stress on sea ice"            standard_name="surface_downward_y_stress"                 unit="N/m2" />
@@ -108,7 +108,7 @@
       <field id="yield11"      long_name="yield surface tensor component 11"                       standard_name="yield11"                                   unit="N/m"  />
       <field id="yield22"      long_name="yield surface tensor component 22"                       standard_name="yield22"                                   unit="N/m"  />
       <field id="yield12"      long_name="yield surface tensor component 12"                       standard_name="yield12"                                   unit="N/m"  />
-      <field id="beta_evp"     long_name="Relaxation parameter of ice rheology (beta)"             standard_name="relaxation_parameter_of_ice_rheology"      unit=""     grid_ref="grid_T_2D" />
+      <field id="beta_evp"     long_name="Relaxation parameter of ice rheology (beta)"             standard_name="relaxation_parameter_of_ice_rheology"      unit=""     grid_ref="grid_T_sfc" />
       <field id="lead_open"    long_name="Lead area opening rate"                                  standard_name="lead_open"                                    unit="1/s"  />
       <field id="rdg_loss"     long_name="Ridging ice area loss rate"                              standard_name="rdg_loss"                                 unit="1/s"  />
       <field id="rft_loss"     long_name="Rafting ice area loss rate"    
@@ -288,42 +288,42 @@ standard_name="rft_loss"                                 unit="1/s"  />
       <field id="intstry"      long_name="Internal stress term in force balance (y-component)"     standard_name="internal_stress_in_sea_ice_y"                                      unit="N/m2" />
 
       <!-- momentum (advection) -->
-      <field id="xmtrpice"     long_name="X-component of ice mass transport"                       standard_name="ice_x_transport"          grid_ref="grid_U_2D"              unit="kg/s" />
-      <field id="ymtrpice"     long_name="Y-component of ice mass transport"                       standard_name="ice_y_transport"          grid_ref="grid_V_2D"              unit="kg/s" />
-      <field id="xmtrpsnw"     long_name="X-component of snw mass transport"                       standard_name="snw_x_transport"          grid_ref="grid_U_2D"              unit="kg/s" />
-      <field id="ymtrpsnw"     long_name="Y-component of snw mass transport"                       standard_name="snw_y_transport"          grid_ref="grid_V_2D"              unit="kg/s" />
-      <field id="xatrp"        long_name="X-component of ice area transport"                       standard_name="area_x_transport"         grid_ref="grid_U_2D"              unit="m2/s" />
-      <field id="yatrp"        long_name="Y-component of ice area transport"                       standard_name="area_y_transport"         grid_ref="grid_V_2D"              unit="m2/s" />
-      <field id="xmtrptot"     long_name="X-component of sea-ice mass transport"                   standard_name="sea_ice_x_transport"      grid_ref="grid_U_2D"              unit="kg/s" > xmtrpice + xmtrpsnw </field>
-      <field id="ymtrptot"     long_name="Y-component of sea-ice mass transport"                   standard_name="sea_ice_y_transport"      grid_ref="grid_V_2D"              unit="kg/s" > ymtrpice + ymtrpsnw </field>
+      <field id="xmtrpice"     long_name="X-component of ice mass transport"                       standard_name="ice_x_transport"          grid_ref="grid_U_sfc"              unit="kg/s" />
+      <field id="ymtrpice"     long_name="Y-component of ice mass transport"                       standard_name="ice_y_transport"          grid_ref="grid_V_sfc"              unit="kg/s" />
+      <field id="xmtrpsnw"     long_name="X-component of snw mass transport"                       standard_name="snw_x_transport"          grid_ref="grid_U_sfc"              unit="kg/s" />
+      <field id="ymtrpsnw"     long_name="Y-component of snw mass transport"                       standard_name="snw_y_transport"          grid_ref="grid_V_sfc"              unit="kg/s" />
+      <field id="xatrp"        long_name="X-component of ice area transport"                       standard_name="area_x_transport"         grid_ref="grid_U_sfc"              unit="m2/s" />
+      <field id="yatrp"        long_name="Y-component of ice area transport"                       standard_name="area_y_transport"         grid_ref="grid_V_sfc"              unit="m2/s" />
+      <field id="xmtrptot"     long_name="X-component of sea-ice mass transport"                   standard_name="sea_ice_x_transport"      grid_ref="grid_U_sfc"              unit="kg/s" > xmtrpice + xmtrpsnw </field>
+      <field id="ymtrptot"     long_name="Y-component of sea-ice mass transport"                   standard_name="sea_ice_y_transport"      grid_ref="grid_V_sfc"              unit="kg/s" > ymtrpice + ymtrpsnw </field>
 
       <!-- Ice transport through straits" -->
-      <field id="xmtrpice_ave"     long_name="Monthly average of x-ice mass transport"   field_ref="xmtrpice"          grid_ref="grid_U_2D"        freq_op="1mo" freq_offset="_reset_"  > @xmtrpice </field>
+      <field id="xmtrpice_ave"     long_name="Monthly average of x-ice mass transport"   field_ref="xmtrpice"          grid_ref="grid_U_sfc"        freq_op="1mo" freq_offset="_reset_"  > @xmtrpice </field>
       <field id="xmtrpice_section"                                                                                     grid_ref="grid_U_scalar"  > xmtrpice_ave </field>
       <field id="xmtrpice_strait"                                                        field_ref="xmtrpice_section"  grid_ref="grid_U_4strait_ice"  />
       <field id="xstrait_mifl"                                                           field_ref="xmtrpice_strait"   grid_ref="grid_U_4strait_ice_hsum" unit="kg/s" detect_missing_value="true" > this * maskMFO_u_ice </field>
 
-      <field id="ymtrpice_ave"     long_name="Monthly average of y-ice mass transport"   field_ref="ymtrpice"          grid_ref="grid_V_2D"        freq_op="1mo" freq_offset="_reset_"  > @ymtrpice </field>
+      <field id="ymtrpice_ave"     long_name="Monthly average of y-ice mass transport"   field_ref="ymtrpice"          grid_ref="grid_V_sfc"        freq_op="1mo" freq_offset="_reset_"  > @ymtrpice </field>
       <field id="ymtrpice_section"                                                                                     grid_ref="grid_V_scalar"  > ymtrpice_ave </field>
       <field id="ymtrpice_strait"                                                        field_ref="ymtrpice_section"  grid_ref="grid_V_4strait_ice"  />
       <field id="ystrait_mifl"                                                           field_ref="ymtrpice_strait"   grid_ref="grid_V_4strait_ice_hsum" unit="kg/s" detect_missing_value="true"  > this * maskMFO_v_ice </field>
 
-      <field id="xmtrpsnw_ave"     long_name="Monthly average of x-snow mass transport"  field_ref="xmtrpsnw"          grid_ref="grid_U_2D"        freq_op="1mo" freq_offset="_reset_"  > @xmtrpsnw </field>
+      <field id="xmtrpsnw_ave"     long_name="Monthly average of x-snow mass transport"  field_ref="xmtrpsnw"          grid_ref="grid_U_sfc"        freq_op="1mo" freq_offset="_reset_"  > @xmtrpsnw </field>
       <field id="xmtrpsnw_section"                                                                                     grid_ref="grid_U_scalar"  > xmtrpsnw_ave </field>
       <field id="xmtrpsnw_strait"                                                        field_ref="xmtrpsnw_section"  grid_ref="grid_U_4strait_ice"  />
       <field id="xstrait_msfl"                                                           field_ref="xmtrpsnw_strait"   grid_ref="grid_U_4strait_ice_hsum" unit="kg/s" detect_missing_value="true" > this * maskMFO_u_ice </field>
 
-      <field id="ymtrpsnw_ave"     long_name="Monthly average of y-snow mass transport"  field_ref="ymtrpsnw"          grid_ref="grid_V_2D"        freq_op="1mo" freq_offset="_reset_"  > @ymtrpsnw </field>
+      <field id="ymtrpsnw_ave"     long_name="Monthly average of y-snow mass transport"  field_ref="ymtrpsnw"          grid_ref="grid_V_sfc"        freq_op="1mo" freq_offset="_reset_"  > @ymtrpsnw </field>
       <field id="ymtrpsnw_section"                                                                                     grid_ref="grid_V_scalar"  > ymtrpsnw_ave </field>
       <field id="ymtrpsnw_strait"                                                        field_ref="ymtrpsnw_section"  grid_ref="grid_V_4strait_ice"  />
       <field id="ystrait_msfl"                                                           field_ref="ymtrpsnw_strait"   grid_ref="grid_V_4strait_ice_hsum" unit="kg/s" detect_missing_value="true"  > this * maskMFO_v_ice </field>
 
-      <field id="xatrp_ave"        long_name="Monthly average of x-ice area transport"   field_ref="xatrp"             grid_ref="grid_U_2D"        freq_op="1mo" freq_offset="_reset_"  > @xatrp </field>
+      <field id="xatrp_ave"        long_name="Monthly average of x-ice area transport"   field_ref="xatrp"             grid_ref="grid_U_sfc"        freq_op="1mo" freq_offset="_reset_"  > @xatrp </field>
       <field id="xatrp_section"                                                                                        grid_ref="grid_U_scalar"  > xatrp_ave </field>
       <field id="xatrp_strait"                                                           field_ref="xatrp_section"     grid_ref="grid_U_4strait_ice"  />
       <field id="xstrait_arfl"                                                           field_ref="xatrp_strait"      grid_ref="grid_U_4strait_ice_hsum" unit="kg/s" detect_missing_value="true" > this * maskMFO_u_ice </field>
 
-      <field id="yatrp_ave"        long_name="Monthly average of y-ice area transport"   field_ref="yatrp"             grid_ref="grid_V_2D"        freq_op="1mo" freq_offset="_reset_"  > @yatrp </field>
+      <field id="yatrp_ave"        long_name="Monthly average of y-ice area transport"   field_ref="yatrp"             grid_ref="grid_V_sfc"        freq_op="1mo" freq_offset="_reset_"  > @yatrp </field>
       <field id="yatrp_section"                                                                                        grid_ref="grid_V_scalar"  > yatrp_ave </field>
       <field id="yatrp_strait"                                                           field_ref="yatrp_section"     grid_ref="grid_V_4strait_ice"  />
       <field id="ystrait_arfl"                                                           field_ref="yatrp_strait"      grid_ref="grid_V_4strait_ice_hsum" unit="m2/s" detect_missing_value="true"  > this * maskMFO_v_ice </field>

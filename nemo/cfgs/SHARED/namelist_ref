@@ -36,9 +36,9 @@
    cn_exp      =  "ORCA2"  !  experience name
    nn_it000    =       1   !  first time step
    nn_itend    =    5840   !  last  time step (std 5840)
-   nn_date0    =  010101   !  date at nit_0000 (format yyyymmdd) used if ln_rstart=F or (ln_rstart=T and nn_rstctl=0 or 1)
-   nn_time0    =       0   !  initial time of day in hhmm
-   nn_leapy    =       0   !  Leap year calendar (1) or not (0)
+   nn_date0    =  010101   !  date at nn_it000 (format yyyymmdd), unused if ln_rstart=T and nn_rstctl=2
+   nn_time0    =       0   !  time of day at nn_it000 (format hhmm), unused if ln_rstart=T and nn_rstctl=2
+   nn_leapy    =       0   !  Leap year calendar (1), 365-day years (0), or 360-day years (30)
    ln_rstart   = .false.   !  start from rest (F) or from a restart file (T)
       nn_rstctl    =    0     !  restart control ==> activated only if ln_rstart=T
       !                          !    = 0 nn_date0 read in namelist ; nn_it000 : read in namelist

@@ -12,6 +12,10 @@
     <domain domain_ref="grid_T" />
   </grid>
   <!--  -->
+  <grid id="grid_T_sfc" >    <!-- grid_T_sfc_inner and grid_T_sfc_halo1 automatically defined -->
+    <domain domain_ref="grid_T" />
+  </grid>  
+  <!--  -->
   <grid id="grid_T_ncatice" >   <!-- grid_T_ncatice_inner and grid_T_ncatice_halo1 automatically defined -->
     <domain domain_ref="grid_T" />
     <axis axis_ref="ncatice" />
@@ -58,6 +62,10 @@
     <domain domain_ref="grid_U" />
   </grid>
   <!--  -->
+  <grid id="grid_U_sfc" >    <!-- grid_U_sfc_inner and grid_U_sfc_halo1 automatically defined -->
+    <domain domain_ref="grid_U" />
+  </grid>    
+  <!--  -->
   <grid id="grid_U_3D" >    <!-- grid_U_3D_inner and grid_U_3D_halo1 automatically defined -->
     <domain domain_ref="grid_U" />
     <axis axis_ref="depthu" />
@@ -66,6 +74,10 @@
   <grid id="grid_V_2D" >    <!-- grid_V_2D_inner and grid_V_2D_halo1 automatically defined -->
     <domain domain_ref="grid_V" />
   </grid>
+  <!--  -->
+  <grid id="grid_V_sfc" >    <!-- grid_V_sfc_inner and grid_V_sfc_halo1 automatically defined -->
+    <domain domain_ref="grid_V" />
+  </grid>    
   <!--  -->
   <grid id="grid_V_3D" >    <!-- grid_V_3D_inner and grid_V_3D_halo1 automatically defined -->
     <domain domain_ref="grid_V" />
@@ -76,6 +88,10 @@
     <domain domain_ref="grid_W" />
   </grid>
   <!--  -->
+  <grid id="grid_W_sfc" >    <!-- grid_W_sfc_inner and grid_W_sfc_halo1 automatically defined -->
+    <domain domain_ref="grid_W" />
+  </grid>    
+  <!--  -->
   <grid id="grid_W_3D" >    <!-- grid_W_3D_inner and grid_W_3D_halo1 automatically defined -->
     <domain domain_ref="grid_W" />
     <axis axis_ref="depthw" />
@@ -84,6 +100,10 @@
   <grid id="grid_F_2D" >    <!-- grid_F_2D_inner and grid_F_2D_halo1 automatically defined -->
     <domain domain_ref="grid_F" />
   </grid>
+  <!--  -->
+  <grid id="grid_F_sfc" >    <!-- grid_F_sfc_inner and grid_F_sfc_halo1 automatically defined -->
+    <domain domain_ref="grid_F" />
+  </grid>    
   <!--  -->
   <grid id="grid_F_3D" >    <!-- grid_F_3D_inner and grid_F_3D_halo1 automatically defined -->
     <domain domain_ref="grid_F" />
@@ -154,13 +174,13 @@
     </scalar>
   </grid>
 
-  <grid id="grid_T_SFC">
+  <grid id="grid_T_zoom_SFC">
     <domain domain_ref="grid_T" name="grid_T" />
     <scalar>
       <extract_axis position="0" />
     </scalar>
   </grid>
-  <grid id="grid_T_SFC_inner">
+  <grid id="grid_T_zoom_SFC_inner">
     <domain domain_ref="grid_T_inner" name="grid_T" />
     <scalar>
       <extract_axis position="0" />

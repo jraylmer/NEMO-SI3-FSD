@@ -171,7 +171,9 @@ CONTAINS
             IF( ln_icedH .AND. ln_virtual_itd ) &
                &              CALL ice_thd_mono( jl )                                    ! --- Extra lateral melting if virtual_itd --- !
             !
+            !
             IF( ln_icedA )    CALL ice_thd_da  ( jl )                                    ! --- Ice Lateral melting --- !
+            !
             !
                               CALL ice_thd_unit_convert( jl, 2 )            ! --- Change units of e_i, e_s from J/m3 to J/m2 --- !
             !
@@ -192,7 +194,7 @@ CONTAINS
       IF( ln_icediachk )   CALL ice_cons2D  (1, 'icethd',  diag_v,  diag_s,  diag_t,  diag_fv,  diag_fs,  diag_ft)
       !
       IF ( ln_pnd .AND. ln_icedH ) &
-         &                    CALL ice_thd_pnd                      ! --- Melt ponds --- !
+         &                    CALL ice_thd_pnd( kt )                ! --- Melt ponds --- !
       !
       IF( jpl > 1  )          CALL ice_itd_rem( kt )                ! --- Transport ice between thickness categories --- !
       !

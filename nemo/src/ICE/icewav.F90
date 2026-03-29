@@ -697,7 +697,7 @@ CONTAINS
       !!
       !! ** Notes   :   ** On the computation of Bfrac and Qfrac for new fracture schemes
       !!
-      !!                   Qfrac(jf) represents the floe-category mean fracture probability.
+      !!                   Qfrac(jf) represents the floe-category mean fracture probability per unit time.
       !!
       !!                   In principle (depending on the assumptions of the chosen scheme), Bfrac is non-zero
       !!                   along the diagonal because it is possible for floes to fracture into sizes in the same
@@ -1015,7 +1015,7 @@ CONTAINS
 
       ! --- Calculate source terms --- !
       DO jf = 1, nn_nfsd
-         pQfrac(jf) = MAX( 0._wp, 1._wp - SUM(zfsd(jf:nn_nfsd)) / zc_b )
+         pQfrac(jf) = MAX( 0._wp, 1._wp - SUM(zfsd(jf:nn_nfsd)) / zc_b ) * r1_Dt_ice
       ENDDO
 
       pBfrac(:,:) = Bfrac_uni(:,:)   ! uniform redistribution
@@ -1094,7 +1094,8 @@ CONTAINS
          zstrain = 2.5_wp * rpi**4 * ph_i * phsw / (grav**2 * pwmp**4)   ! <-- strain experienced by ice
          IF( zstrain >= rn_ice_wav_ecri ) THEN
             DO jf = 1, nn_nfsd
-               pQfrac(jf) = rn_y24a_cw * EXP( -rn_y24a_alpha * (1._wp - floe_rc(jf) / floe_rc(nn_nfsd)) )
+               pQfrac(jf) = rn_y24a_cw * r1_Dt_ice   &
+                  &                    * EXP( -rn_y24a_alpha * (1._wp - floe_rc(jf) / floe_rc(nn_nfsd)) )
             ENDDO
          ENDIF
       ENDIF
@@ -1335,6 +1336,9 @@ CONTAINS
                    &                                * wgtB_y24b(jw,jf2) * floe_dr(jf2)
             ENDDO
          ENDDO
+         !
+         ! Normalise probability rate to time step (units -> s-1):
+         pQfrac(jf1) = pQfrac(jf1) * r1_Dt_ice
          !
          ! Ensure B(s,r)dr is normalised (integrates to 1):
          IF( SUM(pBfrac(jf1,:)) > 0._wp ) pBfrac(jf1,:) = pBfrac(jf1,:) / SUM(pBfrac(jf1,:))
@@ -1600,7 +1604,10 @@ CONTAINS
             ! initial/fractured floes sub-category; unlike schemes Z16 and Y24* it is not possible to
             ! do anything more accurately here)
             !
-            pQfrac(jf) = 2._wp * ( SUM(zWfrac(1:jf-1)) + .5_wp * zWfrac(jf) ) / (x1d(nn_ht15_nx1d) - x1d(1))
+            ! Normalise also by time step (units -> s-1):
+            !
+            pQfrac(jf) = 2._wp * ( SUM(zWfrac(1:jf-1)) + .5_wp * zWfrac(jf) )   &
+               &               / (  rDt_ice * (x1d(nn_ht15_nx1d) - x1d(1))  )
             !
             ! B(s,r)dr = rW(r)dr / int[ r'W(r')dr' ] for r < s, r' < s (no denominator; normalise below)
             pBfrac(jf,1:jf-1) =         zWfrac(1:jf-1)

@@ -23,19 +23,34 @@ MODULE icefsd
    IMPLICIT NONE
    PRIVATE
 
+   INTERFACE ice_fsd_cor
+      !!----------------------------------------------------------------------
+      !!                  ***  INTERFACE ice_fsd_cor ***
+      !!----------------------------------------------------------------------
+      !! ** Purpose :   Generic interface for applying numerical corrections and
+      !!                renormalisation for the floe size distribution (FSD)
+      !!
+      !! ** Method  :   Remove tiny and/or negative values and renormalise FSD
+      !!                variable such that it sums to 1.
+      !!
+      !!----------------------------------------------------------------------
+      MODULE PROCEDURE fsd_cor_1d   ! e.g., a_ifsd(ji,jj,:,jl)
+      MODULE PROCEDURE fsd_cor_2d   ! e.g., a_ifsd(ji,jj,:,:)
+      MODULE PROCEDURE fsd_cor_4d   ! e.g., a_ifsd(:,:,:,:)
+   END INTERFACE
+
    PUBLIC ::   ice_fsd_init               ! routine called by ice_init
    PUBLIC ::   ice_fsd_istate             ! routine called by ice_istate, ice_rst_read
    PUBLIC ::   ice_fsd_wri                ! routine called by ice_stp
    PUBLIC ::   ice_fsd_dia                ! routine called by various routines
    PUBLIC ::   ice_fsd_brit               ! routine called by ice_dyn
-   PUBLIC ::   fsd_cleanup                ! routine called by ice_wav_frac [TODO: sort out names/distinction of this and ice_fsd_cleanup]
-   PUBLIC ::   ice_fsd_cleanup            ! routine called by ice_dyn_adv_pra
    PUBLIC ::   ice_fsd_partition_newice   ! routine called by ice_thd_do
    PUBLIC ::   ice_fsd_add_newice         ! routine called by ice_thd_do
    PUBLIC ::   ice_fsd_welding            ! routine called by ice_thd_do
    PUBLIC ::   ice_fsd_thd_evolve         ! routine called by ice_thd_d{a,o}
    PUBLIC ::   fsd_peri_dens              ! function called by ice_thd_da
    PUBLIC ::   rDt_ice_fsd                ! function called by ice_wav_frac
+   PUBLIC ::   ice_fsd_cor                ! generic interface: small/negative value corrections and re-normalisation
 
    REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:)   :: floe_rl      !: FSD floe radii, lower bounds of categories (m)
    REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:)   :: floe_rc      !: FSD floe radii, centre       of categories (m)
@@ -66,6 +81,78 @@ MODULE icefsd
 #  include "read_nml_substitute.h90"
 
 CONTAINS
+
+   SUBROUTINE fsd_cor_1d( pfsd )
+      !!-------------------------------------------------------------------
+      !!                   ***  ROUTINE fsd_cor_1d  ***
+      !!
+      !! ** Purpose :   Remove small/negative values and re-normalise floe size distribution
+      !! ** Input   :   FSD for one grid cell and one thickness category
+      !!
+      !!-------------------------------------------------------------------
+      !
+      REAL(wp), DIMENSION(nn_nfsd), INTENT(inout) ::   pfsd   ! FSD (one grid cell, one ITD cat.)
+      !
+      REAL(wp) ::   ztotfrac   ! for normalisation
+      INTEGER  ::   jf         ! dummy loop index
+      !
+      !!-------------------------------------------------------------------
+
+      ! Remove negative and/or very small values in each FSD category:
+      WHERE( pfsd <= epsi10 )   pfsd = 0._wp
+
+      ztotfrac = SUM(pfsd(:))   ! should = 1 when properly normalised
+
+      IF(ztotfrac > epsi10) THEN
+         DO jf = 1, nn_nfsd
+            pfsd(jf) = pfsd(jf) / ztotfrac   ! ensure normalisation
+         ENDDO
+      ELSE
+         pfsd(:) = 0._wp   ! => ice-free grid cell, set to exactly 0
+      ENDIF
+
+   END SUBROUTINE fsd_cor_1d
+
+
+   SUBROUTINE fsd_cor_2d( pfsd )
+      !!-------------------------------------------------------------------
+      !!                 ***  ROUTINE fsd_cor_2d  ***
+      !!
+      !! ** Purpose :   Remove small/negative values and re-normalise floe size distribution
+      !! ** Input   :   2-D array, a_ifsd(nn_nfsd,jpl) at one grid cell
+      !!
+      !!-------------------------------------------------------------------
+      !
+      REAL(wp), DIMENSION(nn_nfsd,jpl), INTENT(inout) ::   pfsd   ! FSD, all thickness cats.
+      INTEGER                                         ::   jl     ! dummy loop index
+      !
+      !!-------------------------------------------------------------------
+      DO jl = 1, jpl
+         CALL fsd_cor_1d( pfsd(:,jl) )
+      ENDDO
+   END SUBROUTINE fsd_cor_2d
+
+
+   SUBROUTINE fsd_cor_4d( pfsd )
+      !!-------------------------------------------------------------------
+      !!                 ***  ROUTINE fsd_cor_4d  ***
+      !!
+      !! ** Purpose :   Remove small/negative values and re-normalise floe size distribution
+      !! ** Input   :   4-D array, a_ifsd(jpi,jpj,nn_nfsd,jpl) at all grid cells
+      !!
+      !!-------------------------------------------------------------------
+      !
+      REAL(wp), DIMENSION(jpi,jpj,nn_nfsd,jpl), INTENT(inout) ::   pfsd         ! FSD, all thickness cats., all grid cells
+      INTEGER                                                 ::   ji, jj, jl   ! dummy loop indices
+      !
+      !!-------------------------------------------------------------------
+      DO jl = 1, jpl
+         DO_2D(0, 0, 0, 0)
+            CALL fsd_cor_1d( pfsd(ji,jj,:,jl) )
+         END_2D
+      ENDDO
+   END SUBROUTINE fsd_cor_4d
+
 
    SUBROUTINE ice_fsd_brit
       !!-------------------------------------------------------------------
@@ -130,7 +217,7 @@ CONTAINS
                ENDDO
             ENDIF
             !
-            CALL fsd_cleanup( a_ifsd(ji,jj,:,jl) )
+            CALL ice_fsd_cor( a_ifsd(ji,jj,:,jl) )   ! small/negative value corrections, re-normalisation
             !
          END_2D
       ENDDO
@@ -371,7 +458,7 @@ CONTAINS
          ENDIF
       ENDIF
 
-      CALL fsd_cleanup( pa_ifsd )
+      CALL ice_fsd_cor( pa_ifsd )   ! small/negative value corrections, re-normalisation
 
    END SUBROUTINE ice_fsd_add_newice
 
@@ -517,7 +604,7 @@ CONTAINS
             ztelapsed  = ztelapsed + zdt_sub
             isubt      = isubt + 1
 
-            CALL fsd_cleanup( pa_ifsd )
+            CALL ice_fsd_cor( pa_ifsd )   ! small/negative value corrections, re-normalisation
 
             ! --- Break adaptive time stepping loop if all ice is in
             !     the largest floe category (since all possible welding
@@ -531,7 +618,7 @@ CONTAINS
 
          ENDDO
 
-         CALL fsd_cleanup( pa_ifsd )
+         CALL ice_fsd_cor( pa_ifsd )   ! small/negative value corrections, re-normalisation
 
       ENDIF
 
@@ -700,7 +787,7 @@ CONTAINS
 
       ENDDO
 
-      CALL fsd_cleanup( pa_ifsd(:) )
+      CALL ice_fsd_cor( pa_ifsd(:) )   ! small/negative value corrections, re-normalisation
 
    END SUBROUTINE ice_fsd_thd_evolve
 
@@ -998,76 +1085,6 @@ CONTAINS
       IF( iom_use( cl_ref ) )   CALL iom_put( cl_ref, zdravg * zmsk00   )
 
    END SUBROUTINE ice_fsd_dia
-
-
-   SUBROUTINE fsd_cleanup(pa_ifsd_jl)
-      !!-------------------------------------------------------------------
-      !!                   ***  ROUTINE fsd_cleanup  ***
-      !!
-      !! ** Purpose :   Remove small/negative values and re-normalise floe
-      !!                size distribution
-      !! ** Input   :   FSD for one grid cell and one thickness category
-      !!
-      !!-------------------------------------------------------------------
-      !
-      REAL(wp), DIMENSION(nn_nfsd), INTENT(inout) ::   pa_ifsd_jl
-      !
-      REAL(wp) ::   ztotfrac   ! for normalisation
-      INTEGER  ::   jf         ! dummy loop index
-      !
-      !!-------------------------------------------------------------------
-
-      ! Remove negative and/or very small values in each FSD category.
-      ! (note: icevar.F90 subroutine ice_var_zapsmall uses epsi10 = 1e-10)
-      DO jf = 1, nn_nfsd
-         IF (pa_ifsd_jl(jf) <= epsi10) THEN
-            pa_ifsd_jl(jf) = 0._wp
-         ENDIF
-      ENDDO
-
-      ! Compute total ice fraction for this grid cell and thickness category:
-      ztotfrac = SUM(pa_ifsd_jl(:))
-
-      IF (ztotfrac >= epsi10) THEN
-         ! Ensure normalisation:
-         DO jf = 1, nn_nfsd
-            pa_ifsd_jl(jf) = pa_ifsd_jl(jf) / ztotfrac
-         ENDDO
-      ELSE
-         ! Assume an ice-free grid cell and set to exactly zero:
-         pa_ifsd_jl(:) = 0._wp
-      ENDIF
-
-   END SUBROUTINE fsd_cleanup
-
-
-   SUBROUTINE ice_fsd_cleanup(pa_ifsd)
-      !!-------------------------------------------------------------------
-      !!                 ***  ROUTINE ice_fsd_cleanup  ***
-      !!
-      !! ** Purpose :   Remove small/negative values and re-normalise floe
-      !!                size distribution (wrapper of fsd_cleanup intended
-      !!                for main FSD variable a_ifsd or intermediate variables
-      !!                used in other calculations such as advection).
-      !! 
-      !! ** Input   :   4-D array representing FSD for all grid cells (2-D),
-      !!                all thickness categories.
-      !!
-      !!-------------------------------------------------------------------
-      !
-      REAL(wp), DIMENSION(jpi,jpj,nn_nfsd,jpl), INTENT(inout) ::   pa_ifsd
-      !
-      INTEGER ::   ji, jj, jl   ! dummy loop indices
-      !
-      !!-------------------------------------------------------------------
-
-      DO jl = 1, jpl
-         DO_2D( 0, 0, 0, 0 )
-            CALL fsd_cleanup( pa_ifsd(ji,jj,:,jl) )
-         END_2D
-      ENDDO
-
-   END SUBROUTINE ice_fsd_cleanup
 
 
    SUBROUTINE fsd_initbounds

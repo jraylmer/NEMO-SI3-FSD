@@ -3,8 +3,8 @@ repository have been compiled and tested with at the current commit are:
 
 XIOS2 revision: 2902
 
-NEMO main commit hash: 11a74209
-git describe --tags: debug-76-g11a74209
+NEMO main commit hash: 23bad7b0
+git describe --tags: debug-82-g23bad7b0
 
 
 Compiler and libraries on UoR RACC2

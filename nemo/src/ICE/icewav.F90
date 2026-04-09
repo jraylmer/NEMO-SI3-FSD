@@ -35,7 +35,7 @@ MODULE icewav
       &                                 wknum, wspec                       ! SBC: wave variables
    USE ice               ! sea-ice: variables
    USE icefsd , ONLY :   a_ifsd, nf_newice, floe_rl, floe_rc, floe_ru, floe_dr   ! floe size distribution parameters/variables
-   USE icefsd , ONLY :   rDt_ice_fsd, fsd_cleanup, ice_fsd_dia                   ! floe size distribution functions/routines
+   USE icefsd , ONLY :   rDt_ice_fsd, ice_fsd_cor, ice_fsd_dia                   ! floe size distribution functions/routines
 
    USE in_out_manager    ! I/O manager (needed for lwm and lwp logicals)
    USE iom               ! I/O manager library (needed for iom_put)
@@ -815,7 +815,7 @@ CONTAINS
                !--------------------------------------!
                DO jl = 1, jpl
                   !
-                  CALL fsd_cleanup( a_ifsd(ji,jj,:,jl) )   ! necessary?
+                  CALL ice_fsd_cor( a_ifsd(ji,jj,:,jl) )   ! necessary? Small value corrections/renormalisation
                   !
                   ! Conditions for wave fracture to occur in this ITD category:
                   !  - ice concentration (in this category) cannot be too small
@@ -888,7 +888,7 @@ CONTAINS
                         ENDDO
                      ENDIF
                      !
-                     CALL fsd_cleanup( a_ifsd(ji,jj,:,jl) )
+                     CALL ice_fsd_cor( a_ifsd(ji,jj,:,jl) )   ! small value corrections/re-normalisation
                      !
                   ENDIF ! category jl can fracture
                ENDDO ! -- sub-loop (ice thickness categories)

@@ -20,7 +20,7 @@ MODULE icedyn_adv_pra
    USE ice            ! sea-ice variables
    USE sbc_oce , ONLY : nn_fsbc   ! frequency of sea-ice call
    USE icevar         ! sea-ice: operations
-   USE icefsd  , ONLY : ice_fsd_cleanup  ! subroutine to remove small/negative values and renormalise FSD
+   USE icefsd  , ONLY : ice_fsd_cor  ! interface to remove small/negative values and renormalise FSD
    !
    USE in_out_manager ! I/O manager
    USE iom            ! I/O manager library
@@ -456,7 +456,7 @@ CONTAINS
          !     (because advected fields are not perfectly bounded and tiny negative values can occur, e.g. -1.e-20)
          CALL ice_var_zapneg( ihls, rDt_ice, pv_i, pv_s, psv_i, poa_i, pa_i, pa_ip, pv_ip, pv_il, pe_s, pe_i, pszv_i )
          !
-         IF ( ln_fsd ) CALL ice_fsd_cleanup( pa_ifsd )
+         IF ( ln_fsd ) CALL ice_fsd_cor( pa_ifsd )   ! small/negative value corrections, re-normalisation
          !
          ! derive open water from ice concentration
          DO_2D( 0, 0, 0, 0 )

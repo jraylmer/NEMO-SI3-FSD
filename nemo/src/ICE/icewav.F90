@@ -121,6 +121,9 @@ MODULE icewav
    REAL(wp)        ::   rn_ht15_dx1d      !: Increment of 1D subdomain for wave fracture calculation (m; HT15 only)
    INTEGER         ::   nn_ht15_rmin      !: Radius of smallest floes affected by wave fracture in units of rn_ht15_dx1d
    LOGICAL         ::   ln_ht15_rand      !: Use random phases for SSH in HT15 wave fracture calculation
+   REAL(wp)        ::   rn_ht15_tol       !: Max. fractional difference between iterations for HT15 to 'converge' (ln_ht15_rand=T)
+   INTEGER         ::   nn_ht15_maxiter   !: Max. iterations to convergence for HT15 when ln_ht15_rand=T
+   LOGICAL         ::   ln_ht15_warn      !: Write warnings when HT15 scheme does not converge
    !
    ! Note: other namwav parameters declared in par_ice as they are needed by module
    ! ----- sbcwave which cannot access this module (would create circular dependency)
@@ -735,6 +738,9 @@ CONTAINS
       INTEGER                                 ::   isubt                ! to track number of adaptive time steps
       INTEGER                                 ::   ji, jj, jl, jf       ! dummy loop indices
       !
+      !                                                                 ! -- HT15 scheme only -- !
+      INTEGER                                 ::   zstat, znumfrac      ! to track how often convergence not reached
+      !
       REAL(wp), PARAMETER                     ::   zat_i_min = .01_wp   ! minimum concentration for fracture to occur
       INTEGER , PARAMETER                     ::   isubt_max = 100      ! maximum number of adaptive time steps before warning
       !
@@ -749,6 +755,9 @@ CONTAINS
       ENDIF
 
       za_ifsdb(A2D(0),:,:) = a_ifsd(A2D(0),:,:)   ! save a_ifsd before fracture for tendency diagnostics
+
+      zstat    = 0   ! counter, number of grid points for which convergence NOT reached (HT15 only)
+      znumfrac = 0   ! counter, number of grid points for which HT15 scheme is calculated
 
       !-----------------!
       ! Begin main loop !
@@ -792,7 +801,8 @@ CONTAINS
                   ! Do not do this calculation if local wave spectrum is too weak
                   ! (note: other schemes are much cheaper so similar checks not needed):
                   IF( MAXVAL( wspec(ji,jj,:) ) >= minwspec ) THEN
-                     CALL wav_frac_ht15( wspec(ji,jj,:), zh_i, zQfrac(:), zBfrac(:,:) )
+                     znumfrac = znumfrac + 1   ! add to number of grid cells undergoing fracture
+                     CALL wav_frac_ht15( wspec(ji,jj,:), zh_i, zQfrac(:), zBfrac(:,:), zstat )
                   ELSE
                      zQfrac(:)   = 0._wp
                      zBfrac(:,:) = 0._wp
@@ -895,6 +905,22 @@ CONTAINS
             ENDIF ! ----- MAXVAL(zQfrac) > 0
          ENDIF ! -------- at_i(ji,jj) > zat_i_min
       END_2D ! ---------- main loop
+
+      ! Write warnings if HT15 scheme did not converge for some grid cells
+      IF( nn_frac_scheme == jpfrac_ht15 ) THEN
+         IF ( ln_ht15_warn .AND. (zstat > 0) ) THEN
+            ! Use WRITE directly as ctl_warn only writes on the rank 0 processor
+            ! This means some warnings go into stdout, but not sure how else to do it...
+            WRITE(numout,'(A,I5,A,I5,A,I10,A,I4)')                                   &
+               &   'ice_wav_frac: HT15 scheme did not converge in', zstat, ' of ',   &
+               &   znumfrac, ' grid cells, at kt = ', kt, ', rank ', mpprank
+            WRITE(numout,*) '             Consider increasing nn_ht15_maxiter or rn_ht15_tol'
+            !
+            ! ... call ctl_warn anyway with general message, to append warning count:
+            CALL ctl_warn('ice_wav_frac: HT15 scheme did not converge everywhere -- check stdout AND ocean.output')
+            !
+         ENDIF
+      ENDIF
 
       ! Write FSD tendency diagnostics due to wave fractue:
       CALL ice_fsd_dia( 'wav', za_ifsdb, a_ifsd(A2D(0),:,:), a_i(A2D(0),:), a_i(A2D(0),:) )
@@ -1348,7 +1374,7 @@ CONTAINS
    END SUBROUTINE wav_frac_y24b
 
 
-   SUBROUTINE wav_frac_ht15( pWspec, ph_i, pQfrac, pBfrac )
+   SUBROUTINE wav_frac_ht15( pWspec, ph_i, pQfrac, pBfrac, pstat )
       !!-------------------------------------------------------------------
       !!                 *** ROUTINE wav_frac_ht15 ***
       !!
@@ -1358,7 +1384,11 @@ CONTAINS
       !!
       !! ** Method  :   This scheme calculates a distribution of fractured ice lengths from
       !!                the local sea surface height (SSH) field, n(x), defined along a 1D
-      !!                sub-gridscale domain and computed from the local wave spectrum.
+      !!                sub-gridscale domain and computed from the local wave spectrum. This
+      !!                is defined up to an arbitrary phase per spectral component. That is either
+      !!                set to a constant (default) or, if ln_ht15_rand=T, random phases are used
+      !!                and the calculations that follow are repeated until the 'fracture
+      !!                distribution' (see below) converges to within a specified tolerance.
       !!
       !!                Sea ice is subject to strain due to flexure by the varying SSH
       !!                associated with the local wave field. In this subroutine, ice of
@@ -1396,15 +1426,9 @@ CONTAINS
       !!                than r. This normalisation factor cancels in the expression for B so there
       !!                are no explicit factors of D.
       !!
-      !!                Note also there is an implicit factor of (cg/D) in the expression for Q(r),
-      !!                where cg is the wave group velocity, representing the fraction of the domain
-      !!                reached by waves. This term comes from Horvat and Tziperman (2015) where the
-      !!                model is applied to a single grid box; in this context, the wave field is a
-      !!                local quantity for the grid cell assumed to affect all the ice in the grid
-      !!                cell, so this factor is set to 1 (per second).
-      !!
       !! ** Inputs  :   pWspec(nn_nwfreq)       :   local wave spectrum (spectral energy density; m2.Hz-1)
       !!                ph_i                    :   local (grid cell) mean sea ice thickness (m)
+      !!                pstat                   :   integer, adds 1 to this if convergence is not reached
       !!
       !! ** Outputs :   pQfrac(nn_nfsd)         :   fracture probability function (s-1)
       !!                pBfrac(nn_nfsd,nn_nfsd) :   fracture redistribution function, B(s,r)dr
@@ -1428,8 +1452,11 @@ CONTAINS
       REAL(wp)                            , INTENT(in)    ::   ph_i     ! grid cell mean ice thickness (m)
       REAL(wp), DIMENSION(nn_nfsd)        , INTENT(inout) ::   pQfrac   ! wave fracture probability function (s-1)
       REAL(wp), DIMENSION(nn_nfsd,nn_nfsd), INTENT(inout) ::   pBfrac   ! wave fracture redistribution function, B(s,r)dr
+      INTEGER                             , INTENT(inout) ::   pstat    ! counter for whether convergence reached or not
       !
       INTEGER                              ::   jx, jy, jf              ! dummy loop indices
+      INTEGER                              ::   jiter                   ! iteration counter for convergence
+      INTEGER                              ::   iloop                   ! number of convergence loop iterations (=1 unless ln_ht15_rand=T)
       INTEGER                              ::   ixlo, ixhi              ! indices of x1d to locate extrema
       INTEGER                              ::   ixfrac                  ! number of fracture points along x1d
       LOGICAL , DIMENSION(nn_ht15_nx1d)    ::   llmin, llmax, llext     ! sea surface height is a min / is a max / is an extrema
@@ -1439,186 +1466,252 @@ CONTAINS
       REAL(wp)                             ::   zstrain                 ! strain experienced by sea ice due to wave field
       REAL(wp), DIMENSION(nn_ht15_nx1d)    ::   zxfrac                  ! distances to points along x1d at which ice fractures
       REAL(wp)                             ::   zfrac_rad               ! floe radius of a piece of fractured ice (m)
-      REAL(wp), DIMENSION(nn_nfsd)         ::   zWfrac                  ! fracture distribution (multiplied by dr; dimensionless)
+      INTEGER , DIMENSION(nn_nfsd)         ::   iWfrac                  ! fracture distribution as counts in each floe size category
+      REAL(wp), DIMENSION(nn_nfsd)         ::   zrWfrac_b, zrWfrac      ! fracture distribution (multiplied by rdr; dimensionless;
+      !                                                                 !    one extra with _b for saving previous loop iteration)
+      REAL(wp), DIMENSION(nn_nfsd)         ::   zrWfrac_err             ! fractional differences in zrWfrac between successive iterations
       !
       !!-------------------------------------------------------------------
 
       ! Control:
       IF( ln_timing )   CALL timing_start('wav_frac_ht15')
 
-      ! Initialisation:
-      llmin(:)    = .FALSE.
-      llmax(:)    = .FALSE.
-      ixfrac      = 1
-      zxfrac (:)  = 0._wp
-      zWfrac (:)  = 0._wp
-      pQfrac(:)   = 0._wp
-      pBfrac(:,:) = 0._wp
+      ! Initialisation (some done at start of while loop below):
+      llmin(:)       = .FALSE.
+      llmax(:)       = .FALSE.
+      iWfrac(:)      = 0         ! fracture length counts per FSD category (accumulates with each loop iteration)
+      zrWfrac(:)     = 0._wp     ! fracture distribution multiply by r*dr (updated with each loop iteration)
+      zrWfrac_b(:)   = 0._wp     ! zrWfrac at 'before'/previous iteration
+      zrWfrac_err(:) = 1._wp     ! zrWfrac fractional error for convergence check (initially 1 => first check fails)
+      pQfrac(:)      = 0._wp     ! probability term (returned)
+      pBfrac(:,:)    = 0._wp     ! redistributor term (returned)
 
-      ! Spectral phases [constant for now; possibly add (optional!) random phase later]:
-      zphi(:) = rpi
-
-      ! Calculate sea surface height along 1D subdomain (x1d):
-      zssh(:) = 0._wp
-      DO jf = 1, nn_nwfreq
-         zssh(:) = zssh(:) + SQRT( 2._wp * pWspec(jf) * wdfreq(jf) ) * COS( zphi(jf) + wknum(jf) * x1d(:) )
-      ENDDO
-
-      ! Find local extrema in sea surface height, defined to be minima or maxima over
-      ! a 'moving window' of (2*nn_ht15_rmin + 1) points in the 1D subdomain x1d:
-      !
-      DO jx = 1 + nn_ht15_rmin, nn_ht15_nx1d - nn_ht15_rmin
-         llmax(jx) = ( MAXLOC( zssh(jx-nn_ht15_rmin:jx+nn_ht15_rmin), DIM=1 ) == (nn_ht15_rmin + 1) )
-         llmin(jx) = ( MINLOC( zssh(jx-nn_ht15_rmin:jx+nn_ht15_rmin), DIM=1 ) == (nn_ht15_rmin + 1) )
-         llext(jx) = (llmin(jx) .OR. llmax(jx))
-      ENDDO
-
-      ! Loop over all points again to identify series of three consecutive, alternating
-      ! extrema {min., max., min.} or {max., min., max.}, from which calculate strain
-      ! and hence determine whether ice fractures there or not.
-      !
-      ! Loop start/end indices correspond to first/last possible index that could
-      ! possibly be at the centre of a triplet.
-      !
-      DO jx = 2 + nn_ht15_rmin, nn_ht15_nx1d - nn_ht15_rmin - 1
-         !
-         ! Reset values for next loop iteration. Note: re-using local integer variables
-         ! ixlo and ixhi from above; now they are the indices of x1d corresponding to the
-         ! nearest extrema on either side of the current extrema being considered):
-         !
-         ixlo = 0
-         ixhi = 0
-         !
-         IF( llext(jx) ) THEN
-            !
-            ! Identify nearest extrema on the left [such that x1d(ixlo) < x1d(jx)]:
-            !
-            DO jy = jx-1, 1, -1
-               IF( llext(jy) ) THEN
-                  ixlo = jy
-                  EXIT
-               ENDIF
-            ENDDO
-            !
-            ! Identify nearest extrema on the right [such that x1d(jx) < x1d(ixhi)]:
-            !
-            DO jy = jx+1, nn_ht15_nx1d
-               IF( llext(jy) ) THEN
-                  ixhi = jy
-                  EXIT
-               ENDIF
-            ENDDO
-            !
-            ! If we have a series of three extrema, with the central one being current jx, then both
-            ! ixlo and and ixhi will have changed from 0. If they are alternating {max., min., max.}
-            ! or {min., max., min.}, then calculate strain at x1d(jx) and determine if ice fractures
-            ! there. If it does, append x1d(jx) to zxfrac array and increment ixfrac.
-            !
-            IF( (ixlo > 0) .AND. (ixhi > 0) ) THEN
-               !
-               IF(       ( llmax(ixlo) .AND. llmin(jx) .AND. llmax(ixhi) )   &
-                  & .OR. ( llmin(ixlo) .AND. llmax(jx) .AND. llmin(ixhi) )    ) THEN
-                  !
-                  ! Calculate second derivative of SSH w.r.t. x at index jx
-                  !
-                  ! Centred finite difference for second derivative, forward and backward differences
-                  ! on the first/inner derivatives, using the points x1d(ixlo) < x1d(jx) < x1d(ixhi).
-                  ! Some simplifying algebra results in the calculation below, where also multiplying
-                  ! by half of the mean ice thickness gives the strain at x1d(jx).
-                  !
-                  zdxlo = x1d(jx  ) - x1d(ixlo)
-                  zdx   = x1d(ixhi) - x1d(ixlo)
-                  zdxhi = x1d(ixhi) - x1d(jx  )
-                  !
-                  ! Note: zdx* are all strictly > 0, since ixlo <= jx - 1 and ixhi >= jx + 1
-                  !
-                  zstrain = ABS( .5_wp * ph_i * ( zssh(ixhi) * zdxlo - zssh(jx) * zdx + zssh(ixlo) * zdxhi)   &
-                     &                          / ( zdxlo * zdx * zdxhi ) )
-                  !
-                  ! Only need to know whether this strain exceeds the critical strain
-                  ! If it does, save it as a fracture point in array zxfrac:
-                  IF( zstrain >= rn_ice_wav_ecri ) THEN
-                     zxfrac(ixfrac) = x1d(jx)
-                     ixfrac = ixfrac + 1
-                  ENDIF
-                  !
-               ENDIF ! pssh(jx)  is at the centre of a triplet of alternating min/max
-            ENDIF ! -- pssh(jx)  is at the centre of a triplet of extrema
-         ENDIF ! ----- llext(jx) [pssh(jx) is an extrema]
-      ENDDO ! -------- jx        [loop of x1d points]
-
-      ! Now have locations of strain points, zxfrac(1:ixfrac). The distances between such points, when
-      ! converted to radii and binned into floe size categories, gives the fracture histogram.
-      !
-      ! In loop above, index ixfrac is used to populate zxfrac(:), so now, ixfrac - 1 = number of
-      ! fracture points. So, if:
-      !
-      !    ixfrac == 1    ==> no fractures at all
-      !    ixfrac == 2    ==> 1 fracture point
-      !    ixfrac >= 3    ==> at least 2 fracture points
-      !
-      ! We only compute fracture lengths between fracture points; the end points, x = x1d(1) = 0 and
-      ! x = x1d(nn_ice_wav_nx1d), do not count as fracture points (because we can never calculate the
-      ! strain there). Therefore, only proceed if ixfrac is at least 3.
-      !
-      IF( ixfrac >= 3 ) THEN
-         !
-         DO jx = 2, ixfrac - 1
-            !
-            zfrac_rad = .5_wp * (zxfrac(jx) - zxfrac(jx-1))   ! factor of 0.5 ==> radius of fractured ice
-            !
-            ! Populate appropriate floe size category in fracture histogram, zWfrac(:)
-            ! Just add 1 for now to get relative proportions in each category; scale whole thing afterwards
-            ! Note that zWfrac(:) corresponds to W(r)dr in equation, i.e., there is an implicit factor
-            ! of floe_dr(:) which is hence also present in zBfrac(:,:) calculated later.
-            !
-            DO jf = 1, nn_nfsd - 1
-               IF( zfrac_rad < floe_ru(jf) ) THEN
-                  zWfrac(jf) = zWfrac(jf) + 1._wp
-                  EXIT
-               ENDIF
-            ENDDO
-            !
-            ! Separate check for largest fractures (even if it exceeds upper bound of largest
-            ! floe size category, it goes into that category anyway; note similar for very small
-            ! fractures accounted for in above loop anyway):
-            IF( zfrac_rad >= floe_rl(nn_nfsd) ) zWfrac(nn_nfsd) = zWfrac(nn_nfsd) + 1._wp
-            !
-         ENDDO
-
-         ! Scale fracture histogram with floe size of each category
-         ! (noting W only appears multiplied by r in equations for Q and B):
-         DO jf = 1, nn_nfsd
-            zWfrac(jf) = floe_rc(jf) * zWfrac(jf)
-         ENDDO
-
-         ! Calculate the probability (pQfrac) and redistribution (pBfrac) functions
-         ! from the fracture distribution [zWfrac, which corresponds to rW(r)dr]:
-         DO jf = 1, nn_nfsd
-            !
-            ! Q(r) = 1/(D/2) * int[ r'W(r')dr' ] for r' < r:
-            !
-            ! Floes can fracture into same category, so need to include up to jf, but weight it by 0.5
-            ! to account that not all fracture sizes represented by W(r)dr could have resulted from
-            ! fractures of floes in the same range [r,r+dr] (this is assuming a uniform distribution of
-            ! initial/fractured floes sub-category; unlike schemes Z16 and Y24* it is not possible to
-            ! do anything more accurately here)
-            !
-            ! Normalise also by time step (units -> s-1):
-            !
-            pQfrac(jf) = 2._wp * ( SUM(zWfrac(1:jf-1)) + .5_wp * zWfrac(jf) )   &
-               &               / (  rDt_ice * (x1d(nn_ht15_nx1d) - x1d(1))  )
-            !
-            ! B(s,r)dr = rW(r)dr / int[ r'W(r')dr' ] for r < s, r' < s (no denominator; normalise below)
-            pBfrac(jf,1:jf-1) =         zWfrac(1:jf-1)
-            pBfrac(jf,jf    ) = .5_wp * zWfrac(jf    )   ! again, account for floes fracturing to same cat.
-
-            ! Normalise B (effectively account for denominator in equation):
-            IF( SUM(pBfrac(jf,:)) > 0._wp ) pBfrac(jf,:) = pBfrac(jf,:) / SUM(pBfrac(jf,:))
-            !
-         ENDDO
-
+      ! While loop below is for iterating until convergence IF random phases are being used
+      ! Otherwise (constant/uniform spectral phases), only one iteration is needed:
+      IF( ln_ht15_rand ) THEN   ;   iloop = nn_ht15_maxiter
+      ELSE                      ;   iloop = 1
       ENDIF
+      !
+      jiter = 0   ! iteration counter (*DO NOT CHANGE* start value: used in normalisation)
+      !
+      DO WHILE ( (jiter < iloop) .AND. (MAXVAL(zrWfrac_err) > rn_ht15_tol) )
+
+         ! Initialise or reset for new iteration:
+         ! *DO NOT RESET iWfrac* -- this accumulates values from all iterations
+         ixfrac    = 1
+         zxfrac(:) = 0._wp
+         jiter     = jiter + 1   ! update now as used in normalisation of zrWfrac later
+
+         ! Spectral phases:
+         IF( ln_ht15_rand ) THEN
+            ! Phase for each frequency is a random value between [0, 2pi)
+            !
+            ! NOTE: there are modules 'sto*' with various code structures for using random
+            ! numbers and setting/reading the seed. However it does not seem well developed and
+            ! only activates for stochastic EOS (it has a framework for other processes --
+            ! e.g., ice strength 'p-star' parameter -- but these do not seem to do anything).
+            !
+            ! So, in the future this could potentially be added/interfaced with that and would
+            ! (could?) make this reproducible (by fixing the seed)... for now, this leads to
+            ! non bitwise reproducible behaviour:
+            ! ------------------------------------------------------------------------------- !
+            CALL RANDOM_NUMBER( zphi(:) )     ! random values, uniform distribution on [0, 1  )
+            zphi(:) = zphi(:) * 2._wp * rpi   !                         scale to be on [0, 2pi)
+            ! ------------------------------------------------------------------------------- !
+         ELSE
+            ! Phase is an arbitrary constant, same for all spectral classes:
+            zphi(:) = rpi
+         ENDIF
+
+         ! Calculate sea surface height along 1D subdomain (x1d):
+         zssh(:) = 0._wp
+         DO jf = 1, nn_nwfreq
+            zssh(:) = zssh(:) + SQRT( 2._wp * pWspec(jf) * wdfreq(jf) ) * COS( zphi(jf) + wknum(jf) * x1d(:) )
+         ENDDO
+
+         ! Find local extrema in sea surface height, defined to be minima or maxima over
+         ! a 'moving window' of (2*nn_ht15_rmin + 1) points in the 1D subdomain x1d:
+         !
+         DO jx = 1 + nn_ht15_rmin, nn_ht15_nx1d - nn_ht15_rmin
+            llmax(jx) = ( MAXLOC( zssh(jx-nn_ht15_rmin:jx+nn_ht15_rmin), DIM=1 ) == (nn_ht15_rmin + 1) )
+            llmin(jx) = ( MINLOC( zssh(jx-nn_ht15_rmin:jx+nn_ht15_rmin), DIM=1 ) == (nn_ht15_rmin + 1) )
+            llext(jx) = (llmin(jx) .OR. llmax(jx))
+         ENDDO
+
+         ! Loop over all points again to identify series of three consecutive, alternating
+         ! extrema {min., max., min.} or {max., min., max.}, from which calculate strain
+         ! and hence determine whether ice fractures there or not.
+         !
+         ! Loop start/end indices correspond to first/last possible index that could
+         ! possibly be at the centre of a triplet.
+         !
+         DO jx = 2 + nn_ht15_rmin, nn_ht15_nx1d - nn_ht15_rmin - 1
+            !
+            ! Reset values for next loop iteration. Note: re-using local integer variables
+            ! ixlo and ixhi from above; now they are the indices of x1d corresponding to the
+            ! nearest extrema on either side of the current extrema being considered):
+            !
+            ixlo = 0
+            ixhi = 0
+            !
+            IF( llext(jx) ) THEN
+               !
+               ! Identify nearest extrema on the left [such that x1d(ixlo) < x1d(jx)]:
+               !
+               DO jy = jx-1, 1, -1
+                  IF( llext(jy) ) THEN
+                     ixlo = jy
+                     EXIT
+                  ENDIF
+               ENDDO
+               !
+               ! Identify nearest extrema on the right [such that x1d(jx) < x1d(ixhi)]:
+               !
+               DO jy = jx+1, nn_ht15_nx1d
+                  IF( llext(jy) ) THEN
+                     ixhi = jy
+                     EXIT
+                  ENDIF
+               ENDDO
+               !
+               ! If we have a series of three extrema, with the central one being current jx, then both
+               ! ixlo and and ixhi will have changed from 0. If they are alternating {max., min., max.}
+               ! or {min., max., min.}, then calculate strain at x1d(jx) and determine if ice fractures
+               ! there. If it does, append x1d(jx) to zxfrac array and increment ixfrac.
+               !
+               IF( (ixlo > 0) .AND. (ixhi > 0) ) THEN
+                  !
+                  IF(       ( llmax(ixlo) .AND. llmin(jx) .AND. llmax(ixhi) )   &
+                     & .OR. ( llmin(ixlo) .AND. llmax(jx) .AND. llmin(ixhi) )    ) THEN
+                     !
+                     ! Calculate second derivative of SSH w.r.t. x at index jx
+                     !
+                     ! Centred finite difference for second derivative, forward and backward differences
+                     ! on the first/inner derivatives, using the points x1d(ixlo) < x1d(jx) < x1d(ixhi).
+                     ! Some simplifying algebra results in the calculation below, where also multiplying
+                     ! by half of the mean ice thickness gives the strain at x1d(jx).
+                     !
+                     zdxlo = x1d(jx  ) - x1d(ixlo)
+                     zdx   = x1d(ixhi) - x1d(ixlo)
+                     zdxhi = x1d(ixhi) - x1d(jx  )
+                     !
+                     ! Note: zdx* are all strictly > 0, since ixlo <= jx - 1 and ixhi >= jx + 1
+                     !
+                     zstrain = ABS( .5_wp * ph_i * ( zssh(ixhi) * zdxlo - zssh(jx) * zdx + zssh(ixlo) * zdxhi)   &
+                        &                          / ( zdxlo * zdx * zdxhi ) )
+                     !
+                     ! Only need to know whether this strain exceeds the critical strain
+                     ! If it does, save it as a fracture point in array zxfrac:
+                     IF( zstrain >= rn_ice_wav_ecri ) THEN
+                        zxfrac(ixfrac) = x1d(jx)
+                        ixfrac = ixfrac + 1
+                     ENDIF
+                     !
+                  ENDIF ! pssh(jx)  is at the centre of a triplet of alternating min/max
+               ENDIF ! -- pssh(jx)  is at the centre of a triplet of extrema
+            ENDIF ! ----- llext(jx) [pssh(jx) is an extrema]
+         ENDDO ! -------- jx        [loop of x1d points]
+
+         ! Now have locations of strain points, zxfrac(1:ixfrac). The distances between such points, when
+         ! converted to radii and binned into floe size categories, gives the fracture histogram.
+         !
+         ! In loop above, index ixfrac is used to populate zxfrac(:), so now, ixfrac - 1 = number of
+         ! fracture points. So, if:
+         !
+         !    ixfrac == 1    ==> no fractures at all
+         !    ixfrac == 2    ==> 1 fracture point
+         !    ixfrac >= 3    ==> at least 2 fracture points
+         !
+         ! We only compute fracture lengths between fracture points; the end points, x = x1d(1) = 0 and
+         ! x = x1d(nn_ice_wav_nx1d), do not count as fracture points (because we can never calculate the
+         ! strain there). Therefore, only proceed if ixfrac is at least 3.
+         !
+         IF( ixfrac >= 3 ) THEN
+            DO jx = 2, ixfrac - 1
+               !
+               zfrac_rad = .5_wp * (zxfrac(jx) - zxfrac(jx-1))   ! factor of 0.5 ==> radius of fractured ice
+               !
+               ! Populate appropriate floe size category in iWfrac(:)
+               !
+               ! Note that iWfrac is NOT reset to 0 between outer while loop iterations, so that it
+               ! can be updated until 'convergence' if using the random phase option
+               !
+               DO jf = 1, nn_nfsd - 1
+                  IF( zfrac_rad < floe_ru(jf) ) THEN
+                     iWfrac(jf) = iWfrac(jf) + 1
+                     EXIT
+                  ENDIF
+               ENDDO
+               !
+               ! Separate check for largest fractures (even if it exceeds upper bound of largest
+               ! floe size category, it goes into that category anyway; note similar for very small
+               ! fractures accounted for in above loop anyway):
+               IF( zfrac_rad >= floe_rl(nn_nfsd) ) iWfrac(nn_nfsd) = iWfrac(nn_nfsd) + 1
+               !
+            ENDDO   ! jx           [loop of fracture points]
+         ENDIF   ! -- jxfrac >= 3  [at least 2 fracture points]
+
+         ! Compute rW(r)dr and normalise w.r.t. 1D subdomain size (i.e., divide by D/2) <==> zrWfrac(:)
+         !
+         ! (note: 'normalisation' necessary at this stage even though W(r) is not a normalised
+         ! distribution in the theory, for convergence checks)
+         !
+         ! For one iteration, zrWfrac is normalised by D/2. However, iWfrac is accumulating over
+         ! multiple iterations -- effectively, multiple 'instances' of the 1D sub-domain. So, we
+         ! need to normalise by (D/2) *multiplied* by the iteration count (hence why jiter needs to
+         ! start at 0 then be incremented by 1 at the top of the while loop):
+         !
+         zrWfrac(:) = 2._wp * floe_rc(:) *  REAL(iWfrac(:), KIND=wp)   &
+            &                            / (REAL(jiter    , KIND=wp) * (x1d(nn_ht15_nx1d) - x1d(1)))
+
+         ! Fractional difference of current zrWfrac from previous iteration
+         ! Breaks while loop if/when this is below tolerance value for all categories
+         !
+         ! First set to 0 if both before (zrWfrac_b) and current zrWfrac are ~0; otherwise, 1
+         ! Then in latter case calculate fractional difference as along as zrWfrac_b /= 0
+         !
+         WHERE( (zrWfrac_b <= epsi10) .AND. (zrWfrac <= epsi10) )   ;   zrWfrac_err = 0._wp
+         ELSEWHERE                                                  ;   zrWfrac_err = 1._wp
+         ENDWHERE
+         !
+         WHERE( zrWfrac_b > epsi10 )   zrWfrac_err = ABS( zrWfrac - zrWfrac_b ) / zrWfrac_b
+
+         zrWfrac_b(:) = zrWfrac(:)   ! save for next iteration
+
+      ENDDO   ! while loop
+
+      ! Add to counter if convergence not reached. This is (optionally) reported in ice_wav_frac:
+      IF( ln_ht15_rand .AND. (jiter == iloop) )   pstat = pstat + 1
+
+      ! Calculate the probability (pQfrac) and redistribution (pBfrac) functions
+      ! from the fracture distribution [zrWfrac, which corresponds to rW(r)dr/(D/2)]:
+      DO jf = 1, nn_nfsd
+         !
+         ! Q(r) = 1/(D/2) * int[ r'W(r')dr' ] for r' < r:
+         !
+         ! Factor of 1/(D/2) already accounted for in calculation of zrWfrac
+         !
+         ! Floes can fracture into same category, so need to include up to jf, but weight it by 0.5
+         ! to account that not all fracture sizes represented by rW(r)dr could have resulted from
+         ! fractures of floes in the same range [r,r+dr] (this is assuming a uniform distribution of
+         ! initial/fractured floes sub-category; unlike schemes Z16 and Y24* it is not possible to
+         ! do anything more accurately here)
+         !
+         ! Normalise also by time step (units -> s-1):
+         !
+         pQfrac(jf) = ( SUM(zrWfrac(1:jf-1)) + .5_wp * zrWfrac(jf) ) * r1_Dt_ice
+
+         ! B(s,r)dr = rW(r)dr / int[ r'W(r')dr' ] for r < s, r' < s
+         ! [zrWfrac includes factor 1/(D/2), but this cancels in this expression
+         ! and normalisation below, so doesn't matter]:
+         !
+         pBfrac(jf,1:jf-1) =         zrWfrac(1:jf-1)
+         pBfrac(jf,jf    ) = .5_wp * zrWfrac(jf    )   ! again, account for floes fracturing to same cat.
+
+         ! Normalise B (effectively account for denominator in equation):
+         IF( SUM(pBfrac(jf,:)) > 0._wp ) pBfrac(jf,:) = pBfrac(jf,:) / SUM(pBfrac(jf,:))
+         !
+      ENDDO
 
       ! Control:
       IF( ln_timing )   CALL timing_stop('wav_frac_ht15')
@@ -1864,6 +1957,7 @@ CONTAINS
          &             rn_z16_b       , rn_z16_hc      ,                                    &
          &             rn_y24a_cw     , rn_y24a_alpha  ,                                    &
          &             nn_ht15_nx1d   , rn_ht15_dx1d   , nn_ht15_rmin   , ln_ht15_rand  ,   &
+         &             rn_ht15_tol    , nn_ht15_maxiter, ln_ht15_warn   ,                   &
          &             ln_ice_wav_attn, rn_attn_lam_tol, rn_attn_c0     , rn_attn_ch    ,   &
          &             rn_attn_ch     , rn_attn_ct     , rn_attn_ch2    , rn_attn_ct2   ,   &
          &             rn_attn_cht    , rn_attn_tun
@@ -1908,6 +2002,9 @@ CONTAINS
          WRITE(numout,*) '               Increment of 1D subdomain for (m)               rn_ht15_dx1d = ', rn_ht15_dx1d
          WRITE(numout,*) '               Smallest floe radius affected by waves (dx1d)   nn_ht15_rmin = ', nn_ht15_rmin
          WRITE(numout,*) '               Use random phases or not                        ln_ht15_rand = ', ln_ht15_rand
+         WRITE(numout,*) '                  Tolerance for convergence (error fraction)    rn_ht15_tol = ', rn_ht15_tol
+         WRITE(numout,*) '                  Max. iterations for convergence           nn_ht15_maxiter = ', nn_ht15_maxiter
+         WRITE(numout,*) '                  Warn whenever convergence not reached        ln_ht15_warn = ', ln_ht15_warn
       ENDIF
 
       IF( ln_ice_wav ) THEN

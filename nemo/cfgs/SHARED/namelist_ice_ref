@@ -384,8 +384,13 @@
          rn_y24a_cw    = 0.8             ! Fracture probability function tuning parameter (0 < cw <= 1)
          rn_y24a_alpha = 1.0             ! Fracture probability function tuning parameter (alpha > 0)
                  ! -- nn_frac_scheme=4 --!
-         ln_ht15_rand = .false.          ! use random phases when calculating sea surface height (SSH)
          nn_ht15_nx1d = 10000            ! number of points in 1D subdomain for SSH
          rn_ht15_dx1d = 1.               ! increment of 1D subdomain for SSH calculation (m)
          nn_ht15_rmin = 10               ! radius of smallest floes affected by wave fracture in units of rn_ice_wav_dx1d
+         ln_ht15_rand = .false.          ! use random phases when calculating sea surface height (SSH)
+                                         ! *WARNING* HUGE computational impact if T
+                                         ! *WARNING* not bitwise reproducible  if T
+            rn_ht15_tol     = 0.05       !    Fractional error tolerance on fracture distribution for convergence
+            nn_ht15_maxiter = 100        !    Max. number of iterations to try to converge fracture distribution
+            ln_ht15_warn    = .true.     !    Warn when convergence to tolerance level not achieved within max. iterations
 /

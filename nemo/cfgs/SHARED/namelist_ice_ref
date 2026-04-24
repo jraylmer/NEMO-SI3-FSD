@@ -327,9 +327,26 @@
 &namfsd         ! floe size distribution
 !------------------------------------------------------------------------------
    ln_fsd           = .false.         ! use FSD (T) or not (F)
-     !
-     nn_nfsd          = 12              ! number of floe size distribution categories
-     rn_floeshape     = 0.66            ! floe shape parameter (dimensionless)
+                   ! -- category def. --!
+     nn_fsd_catini    = 2               ! option for FSD category limits (as radii):
+                                        !   0   = user defined (read first nn_nfsd+1 values from rn_fsd_catbnd below)
+                                        !   1-3 = calculate nn_nfsd categories between nn_fsd_rmin and nn_fsd_rmax (below) such that:
+                                        !     1 =   spacing is uniform (equal-width categories)
+                                        !     2 =   spacing follows Gaussian profile (recommended for floe size range ~  1km)
+                                        !     3 =   spacing increases exponentially  (recommended for floe size range ~ 10km)
+                                        !   Note: categories are printed in ocean.output for checking
+                                        !
+       nn_nfsd          = 12            !   number of floe size distribution categories
+       rn_fsd_rmin      = 0.1           !   smallest floe size (radius; m)
+       rn_fsd_rmax      = 1000.         !   largest  floe size (radius; m)
+       rn_fsd_rspc      = 1.            !   non-linearity adjustment, nn_fsd_catini = 2 or 3 (> 0, ~1)
+                                        !     =1           => strong Gaussian/exponential
+                                        !     approaches 0 => becomes closer to uniform case (for same rmin--rmax range)
+                                        !
+       rn_fsd_catbnd    = .1, 5., 10., 15., 20., 30., 40., 60., 100., 200., 400., 650., 1000.
+                                        !
+       rn_floeshape     = 0.66          ! floe shape parameter to determine floe area from radius (dimensionless)
+                                        !
      nn_fsd_ini       = 2               ! initialisation method (ln_iceini = T OR ln_rstart = T from previous run with no FSD)
                                         !   1 = all ice in largest floe size category
                                         !   2 = imposed power law (same distribution everywhere, all grid points)

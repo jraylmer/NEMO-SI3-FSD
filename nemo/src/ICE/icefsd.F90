@@ -69,8 +69,13 @@ MODULE icefsd
    REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:,:)   ::   a_i_b0      !: a_i truly at before time step
 
    ! ** namelist (namfsd) **
+   REAL(wp), DIMENSION(100) ::      rn_fsd_catbnd   ! User-defined category limits if nn_nfsd_catini = 0 (below)
+   INTEGER  ::   nn_fsd_catini      ! FSD category definition option
+   REAL(wp) ::   rn_fsd_rmin        ! Minimum floe size (radius in m; nn_fsd_catini >= 1)
+   REAL(wp) ::   rn_fsd_rmax        ! Minimum floe size (radius in m; nn_fsd_catini >= 1)
+   REAL(wp) ::   rn_fsd_rspc        ! Category spacing non-linearity parameter (nn_fsd_catini = 2,3)
    INTEGER  ::   nn_fsd_ini         ! FSD init. options (1 = all in largest FSD cat; 2 = imposed power law)
-   REAL(wp) ::   rn_fsd_ini_alpha   ! Parameter used for power law initial FSD with nn_icefsd_ini = 2 only
+   REAL(wp) ::   rn_fsd_ini_alpha   ! Parameter used for power law initial FSD with nn_fsd_ini = 2 only
    REAL(wp) ::   rn_fsd_r_newice    ! Floe size of new ice in absence of wave field [m]
    REAL(wp) ::   rn_fsd_t_restore   ! FSD restoring timescale [s]
    REAL(wp) ::   rn_fsd_amin_weld   ! Minimum concentration required for floe welding to take effect
@@ -1091,51 +1096,161 @@ CONTAINS
       !!-------------------------------------------------------------------
       !!                 ***  ROUTINE fsd_init_bounds  ***
       !!
-      !! ** Purpose :   Creates the FSD category boundaries and related arrays
+      !! ** Purpose :   Calculate or read FSD category boundaries and related arrays
       !!
-      !! ** Method  :   Determines FSD category boundaries from namelist
-      !!                parameter nn_nfsd. The actual boundaries are hard-coded for now
-      !!                (using the same values from CICE/Icepack; this will be changed
-      !!                to a more flexible set of options later).
+      !! ** Method  :   Select method to determine category limits from namelist parameter
+      !!                nn_fsd_catini:
+      !!
+      !!                   0 = read nn_nfsd+1 directly from namelist parameter rn_fsd_catbnd
+      !!                   1 = compute uniformly-spaced bounds
+      !!                   2 = compute bounds with increasing spacing following Gaussian profile
+      !!                   3 = compute bounds with exponentially-increasing spacing
+      !!
+      !!                For 1-3, bounds are placed between a minimum and maximum floe size (radius)
+      !!                set via namelist parameters rn_fsd_rmin and rn_fsd_rmax. For 2-3, an additional
+      !!                parameter rn_fsd_rspc controls the degree of curvature/non-linearity in the
+      !!                Gaussian or exponential curve.
+      !!
+      !!                nn_fsd_catini = 2 (Gaussian spacing)
+      !!
+      !!                      L(j) = L(j-1) + k * [1 - EXP( -( (j-1)/(s*n) )^2 )]   for   j = 2..(n+1)
+      !!
+      !!                   where n = nn_nfsd, s = rn_fsd_rspc, k is calculated to ensure that
+      !!                   L(n+1) = rmax, and L(1) is defined to be rmin. The exponent includes a
+      !!                   factor of n so that the overall shape is not affected by changing rmin or
+      !!                   rmax and to make s a 'scaling' parameter rather than depending on choice of n.
+      !!
+      !!                nn_fsd_catini = 3 (exponentially-increasing spacing)
+      !!
+      !!                      L(j) = L(j-1) + k * EXP( 10*s*(j-1)/n )   for   j = 2..(n+1)
+      !!
+      !!                   with parameters defined similarly to the Gaussian case. Here an ad-hoc factor
+      !!                   of 10 is included to set an appropriate degree of non-linearity with default
+      !!                   parameters. Particularly, increasing s much beyond 1 here can make spacing so
+      !!                   small (at lower j) that it cannot be resolved. In all cases, a warning is thus
+      !!                   written if any category width is below 1cm (arbitrarily).
+      !!
+      !!             Category limits are printed in ocean.output. The limits are then used to calculate
+      !!             other related constant arrays, including the floe areas, welding array (floe_iweld),
+      !!             and gradient in log space (for subroutine ice_fsd_brit).
       !!
       !!-------------------------------------------------------------------
       !
-      REAL(wp), DIMENSION(25) ::   zlims   ! floe size category limits
+      REAL(wp), DIMENSION(nn_nfsd+1) ::   zlims   ! floe size category limits
       !
+      REAL(wp) ::   znfsd           ! number of FSD categories as REAL
+      REAL(wp) ::   zk              ! spacing scale factor for Gaussian/exponential limits case
       REAL(wp) ::   zfloe_aweld     ! area of two welded floes (for computing floe_iweld)
       INTEGER  ::   jf1, jf2, jf3   ! dummy loop indices
       INTEGER  ::   ierr            ! allocate status return value
       !
       !!-------------------------------------------------------------------
 
-      ! Floe size category boundaries are hard-coded based on number of
-      ! categories specified (here nn_nfsd) in CICE/Icepack. Below are the
-      ! same limits. Note that, except when nn_nfsd = 1, increasing nn_nfsd
-      ! only adds larger floe size categories (i.e., smallest floe categories
-      ! are the same):
-      zlims = (/ 6.65000000e-02_wp, 5.31030847e+00_wp, 1.42865861e+01_wp, 2.90576686e+01_wp,   &
-         &       5.24122136e+01_wp, 8.78691405e+01_wp, 1.39518470e+02_wp, 2.11635752e+02_wp,   &
-         &       3.08037274e+02_wp, 4.31203059e+02_wp, 5.81277225e+02_wp, 7.55141047e+02_wp,   &
-         &       9.45812834e+02_wp, 1.34354446e+03_wp, 1.82265364e+03_wp, 2.47261361e+03_wp,   &
-         &       3.35434988e+03_wp, 4.55051413e+03_wp, 6.17323164e+03_wp, 8.37461170e+03_wp,   &
-         &       1.13610059e+04_wp, 1.54123510e+04_wp, 2.09084095e+04_wp, 2.83643675e+04_wp,   &
-         &       3.84791270e+04_wp /)
+      ALLOCATE(floe_rl(nn_nfsd), floe_rc(nn_nfsd), floe_ru(nn_nfsd), floe_dr(nn_nfsd),   &
+         &     floe_al(nn_nfsd), floe_ac(nn_nfsd), floe_au(nn_nfsd),                     &
+         &     floe_dlog_rc(nn_nfsd-1), floe_iweld(nn_nfsd, nn_nfsd), STAT=ierr)
 
-      IF((nn_nfsd > 24) .OR. (nn_nfsd < 1)) THEN
-         CALL ctl_stop('fsd_init_bounds: number of floe size categories: need 2 <= nn_nfsd <= 24')
-      ELSE
-         ALLOCATE(floe_rl(nn_nfsd), floe_rc(nn_nfsd), floe_ru(nn_nfsd), floe_dr(nn_nfsd),   &
-            &     floe_al(nn_nfsd), floe_ac(nn_nfsd), floe_au(nn_nfsd),                     &
-            &     floe_dlog_rc(nn_nfsd-1), floe_iweld(nn_nfsd, nn_nfsd), STAT=ierr)
+      IF (ierr /= 0) CALL ctl_stop('fsd_init_bounds: could not allocate FSD radii/area arrays')
 
-         IF (ierr /= 0) CALL ctl_stop('fsd_init_bounds: could not allocate FSD radii/area arrays')
-      ENDIF
+      znfsd = REAL(nn_nfsd, KIND=wp)   ! for some computation of category limits below
+
+      SELECT CASE( nn_fsd_catini )
+            !
+         CASE( 0 )   ! === Read from namelist === !
+            !
+            IF(lwp) WRITE(numout,*) 'nn_fsd_catini = 0  ==>>  FSD category limits written in namelist:'
+            !
+            zlims(:) = rn_fsd_catbnd(1:nn_nfsd+1)
+            !
+            ! These should NOT be used anywhere outside this routine, but just in case:
+            rn_fsd_rmin = zlims(1)
+            rn_fsd_rmax = zlims(nn_nfsd+1)
+            !
+         CASE( 1 )   ! === Uniformly-spaced bounds === !
+            !
+            IF(lwp) WRITE(numout,*) 'nn_fsd_catini = 1  ==>>  FSD category limits are uniformly spaced:'
+            !
+            zlims(1)         = rn_fsd_rmin
+            zlims(nn_nfsd+1) = rn_fsd_rmax
+            !
+            DO jf1 = 2, nn_nfsd
+               zlims(jf1) = rn_fsd_rmin + (rn_fsd_rmax - rn_fsd_rmin) * REAL(jf1 - 1, KIND=wp) / znfsd
+            ENDDO
+            !
+         CASE( 2 )   ! === Gaussian-spaced bounds === !
+            !
+            IF(lwp) WRITE(numout,*) 'nn_fsd_catini = 2  ==>>  FSD category limits are Gaussian spaced:'
+            !
+            ! Determine multiplier k:
+            zk = 0._wp
+            DO jf1 = 1, nn_nfsd
+               zk = zk + 1._wp - EXP( -( REAL(nn_nfsd - jf1 + 1, KIND=wp) / (rn_fsd_rspc * znfsd) )**2 )
+            ENDDO
+            zk = (rn_fsd_rmax - rn_fsd_rmin) / zk
+            !
+            zlims(1) = rn_fsd_rmin
+            DO jf1 = 2, nn_nfsd + 1
+               zlims(jf1) = zlims(jf1-1) + zk * ( 1._wp - EXP( -(REAL(jf1 - 1, KIND=wp) / (rn_fsd_rspc * znfsd) )**2) )
+            ENDDO
+            !
+         CASE( 3 )   ! === Exponentially-spaced bounds === !
+            !
+            IF(lwp) WRITE(numout,*) 'nn_fsd_catini = 3  ==>>  FSD category spacing increases exponentially:'
+            !
+            ! Determine multiplier k:
+            zk = 0._wp
+            DO jf1 = 2, nn_nfsd + 1
+               zk = zk + EXP( 10._wp * rn_fsd_rspc * REAL(jf1 - 1, KIND=wp) / znfsd )
+            ENDDO
+            zk = (rn_fsd_rmax - rn_fsd_rmin) / zk
+            !
+            zlims(1) = rn_fsd_rmin
+            DO jf1 = 2, nn_nfsd + 1
+               zlims(jf1) = zlims(jf1-1) + zk * EXP( 10._wp * rn_fsd_rspc * REAL(jf1 - 1, KIND=wp) / znfsd )
+            ENDDO
+            !
+         CASE DEFAULT
+            !
+            CALL ctl_stop('fsd_init_bounds: must choose nn_fsd_catini = 0, 1, 2, or 3')
+            !
+      ENDSELECT
 
       floe_rl = zlims(1:nn_nfsd)
       floe_ru = zlims(2:nn_nfsd+1)
-      floe_rc = 0.5_wp * (floe_ru + floe_rl)
+      floe_rc = .5_wp * (floe_ru + floe_rl)
 
       floe_dr = floe_ru - floe_rl
+
+      ! Write FSD bounds in ocean.output (continuing from control print in ice_fsd_init)
+      IF(lwp) THEN
+         WRITE(numout,*)
+         DO jf1 = 1, nn_nfsd
+            WRITE(numout,'(A,F12.5,A,I2,A,F12.5,A)') '                         ',   &
+               &    floe_rl(jf1), ' m <= category ', jf1, ' < ', floe_ru(jf1), ' m'
+         ENDDO
+         WRITE(numout,*) ''
+         !
+         ! Write uniform or min./max. category width(s):
+         IF( nn_fsd_catini == 1 ) THEN
+            WRITE(numout,'(A,A,F12.5,A)') '                      ',   &
+               &   '==>>> Uniform categories of width: ', floe_dr(1), ' m'
+         ELSE
+            WRITE(numout,'(A,A,F12.5,A)') '           ',   &
+               &   '==>>> Non-uniform categories, smallest width: ', MINVAL(floe_dr(:)), ' m'
+            WRITE(numout,'(A,A,F12.5,A)') '           ',   &
+               &   '                               largest width: ', MAXVAL(floe_dr(:)), ' m'
+         ENDIF
+         WRITE(numout,*) ''
+      ENDIF
+
+      ! Sometimes automatic category spacing is too small, particularly in exponential case
+      ! Check for small category widths and warn with suggested changes in each case:
+      IF( ANY( ABS(floe_dr(:)) < 1.e-2 ) ) THEN
+         CALL ctl_warn('fsd_init_bounds: some FSD categories are very small, < 1cm width; consider:'   ,   &
+               &       '                 nn_fsd_catini = 0  : making your categories wider'            ,   &
+               &       '                 nn_fsd_catini = 1-2: (in/de)creasing rn_fsd_rmin/rn_fsd_rmax)',   &
+               &       '                 nn_fsd_catini = 2-3: decreasing rn_fsd_rspc (recommend <= 1)'     )
+      ENDIF
 
       floe_al = 4._wp * rn_floeshape * floe_rl ** 2
       floe_ac = 4._wp * rn_floeshape * floe_rc ** 2
@@ -1313,8 +1428,10 @@ CONTAINS
       INTEGER ::   ios, ioptio   ! Local integer output status for namelist read
       INTEGER ::   ierr          ! Local integer allocate status
       !!
-      NAMELIST/namfsd/ ln_fsd, nn_nfsd, rn_floeshape, nn_fsd_ini, rn_fsd_ini_alpha,   &
-         &             rn_fsd_r_newice, rn_fsd_amin_weld, rn_fsd_c_weld, rn_fsd_t_restore
+      NAMELIST/namfsd/ ln_fsd          , nn_fsd_catini   , nn_nfsd        , rn_fsd_rmin     ,   &
+         &             rn_fsd_rmax     , rn_fsd_rspc     , rn_fsd_catbnd  , rn_floeshape    ,   &
+         &             nn_fsd_ini      , rn_fsd_ini_alpha, rn_fsd_r_newice, rn_fsd_t_restore,   &
+         &             rn_fsd_amin_weld, rn_fsd_c_weld
       !!-------------------------------------------------------------------
       !
       READ_NML_REF(numnam_ice, namfsd)
@@ -1327,14 +1444,19 @@ CONTAINS
          WRITE(numout,*) '~~~~~~~~~~~~'
          WRITE(numout,*) '   Namelist namfsd:'
          WRITE(numout,*) '      Floe size distribution activated or not                    ln_fsd = ', ln_fsd
-         WRITE(numout,*) '         Number of floe size categories                         nn_nfsd = ', nn_nfsd
-         WRITE(numout,*) '         Floe shape parameter                              rn_floeshape = ', rn_floeshape
+         WRITE(numout,*) '         FSD category initialisation                      nn_fsd_catini = ', nn_fsd_catini
+         WRITE(numout,*) '            Number of floe size categories                      nn_nfsd = ', nn_nfsd
+         WRITE(numout,*) '            Minimum floe size     (nn_fsd_catini /= 0  )    rn_fsd_rmin = ', rn_fsd_rmin
+         WRITE(numout,*) '            Maximum floe size     (nn_fsd_catini /= 0  )    rn_fsd_rmax = ', rn_fsd_rmax
+         WRITE(numout,*) '            Spacing non-linearity (nn_fsd_catini  = 2,3)    rn_fsd_rspc = ', rn_fsd_rspc
+         WRITE(numout,*) '            Floe shape parameter, to determine floe areas  rn_floeshape = ', rn_floeshape
          WRITE(numout,*) '         FSD initialisation case (ln_iceini = T)             nn_fsd_ini = ', nn_fsd_ini
          WRITE(numout,*) '            Power law exponent  (nn_fsd_ini = 2)       rn_fsd_ini_alpha = ', rn_fsd_ini_alpha
          WRITE(numout,*) '         Floe size of new ice (in absence of waves)    rn_fsd_r_newice  = ', rn_fsd_r_newice
          WRITE(numout,*) '         Floe welding minimum sea ice concentration    rn_fsd_amin_weld = ', rn_fsd_amin_weld
          WRITE(numout,*) '         Floe welding coefficient                         rn_fsd_c_weld = ', rn_fsd_c_weld
          WRITE(numout,*) '         FSD restoring (brittle fracture) time scale   rn_fsd_t_restore = ', rn_fsd_t_restore
+         WRITE(numout,*) ''
       ENDIF
 
       IF(ln_fsd) THEN
@@ -1346,16 +1468,6 @@ CONTAINS
          IF( ierr /= 0 )   CALL ctl_stop('ice_fsd_init: could not allocate arrays')
 
          CALL fsd_initbounds
-
-         ! Writing the FSD bounds in CICE/Icepack is done within its analogue
-         ! of the fsd_init_bounds subroutine. I think it makes more sense here,
-         ! continuing from the above printing.
-         !
-         IF(lwp) THEN   ! continue control print
-            DO jf = 1, nn_nfsd
-               WRITE(numout,*) floe_rl(jf), ' < fsd Cat ', jf, ' < ', floe_ru(jf)
-            ENDDO
-         ENDIF
 
       ENDIF
 

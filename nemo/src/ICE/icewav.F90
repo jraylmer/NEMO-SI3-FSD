@@ -35,7 +35,7 @@ MODULE icewav
       &                                 wknum, wspec                       ! SBC: wave variables
    USE ice               ! sea-ice: variables
    USE icefsd , ONLY :   a_ifsd, nf_newice, floe_rl, floe_rc, floe_ru, floe_dr   ! floe size distribution parameters/variables
-   USE icefsd , ONLY :   rDt_ice_fsd, ice_fsd_cor, ice_fsd_dia                   ! floe size distribution functions/routines
+   USE icefsd , ONLY :   ice_fsd_timestep, ice_fsd_cor, ice_fsd_dia              ! floe size distribution routines
 
    USE in_out_manager    ! I/O manager (needed for lwm and lwp logicals)
    USE iom               ! I/O manager library (needed for iom_put)
@@ -691,12 +691,12 @@ CONTAINS
       !!
       !!                3.   Evolve the FSD using adaptive time stepping (Horvat and Tziperman, 2017).
       !!                     Additional time-step restrictions apply when evolving f(r), so a smaller step
-      !!                     is (possibly) required, calculated in function rDt_ice_fsd() in module icefsd.
+      !!                     is (possibly) required, calculated in subroutine ice_fsd_timestep in module icefsd.
       !!
       !! ** Callers :   ice_stp -> [ice_wav_frac]
       !! ** Calls   :              [ice_wav_frac] -> wav_frac_{z16,y24a,y24b,ht15}
-      !! ** Invokes :              [ice_wav_frac] -> wav_spec_bret()   (ln_ice_wav_spec = F AND ln_ice_wav_attn = F)
-      !!                           [ice_wav_frac] -> rDt_ice_fsd()
+      !!                           [ice_wav_frac] -> ice_fsd_timestep
+      !!                           [ice_wav_frac] -> wav_spec_bret()   (ln_ice_wav_spec = F AND ln_ice_wav_attn = F)
       !!
       !! ** Notes   :   ** On the computation of Bfrac and Qfrac for new fracture schemes
       !!
@@ -855,11 +855,12 @@ CONTAINS
                         !
                         WHERE( ABS(za_ifsd_tend) < epsi10 ) za_ifsd_tend = 0._wp
                         !
-                        ! Compute adaptive timestep to increment FSD in each floe size
-                        ! category, and make sure we do not overshoot actual time step:
-                        zdt_sub = rDt_ice_fsd( a_ifsd(ji,jj,:,jl), za_ifsd_tend(:) )
+                        ! Compute adaptive timestep to increment FSD in each floe size category:
+                        CALL ice_fsd_timestep( 'ice_wav_frac', a_ifsd(ji,jj,:,jl), za_ifsd_tend(:), zdt_sub )
+
+                        ! Make sure to not overshoot actual timestep:
                         zdt_sub = MIN(zdt_sub, rDt_ice - ztelapsed)
-                        !
+
                         ! Update FSD and time elapsed:
                         a_ifsd(ji,jj,:,jl) = a_ifsd(ji,jj,:,jl) + zdt_sub * za_ifsd_tend(:)
                         ztelapsed          = ztelapsed + zdt_sub

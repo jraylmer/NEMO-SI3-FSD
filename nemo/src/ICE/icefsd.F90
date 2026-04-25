@@ -48,8 +48,8 @@ MODULE icefsd
    PUBLIC ::   ice_fsd_add_newice         ! routine called by ice_thd_do
    PUBLIC ::   ice_fsd_welding            ! routine called by ice_thd_do
    PUBLIC ::   ice_fsd_thd_evolve         ! routine called by ice_thd_d{a,o}
+   PUBLIC ::   ice_fsd_timestep           ! routine called by ice_wav_frac
    PUBLIC ::   fsd_peri_dens              ! function called by ice_thd_da
-   PUBLIC ::   rDt_ice_fsd                ! function called by ice_wav_frac
    PUBLIC ::   ice_fsd_cor                ! generic interface: small/negative value corrections and re-normalisation
 
    REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:)   :: floe_rl      !: FSD floe radii, lower bounds of categories (m)
@@ -599,9 +599,10 @@ CONTAINS
             ENDDO
 
             ! --- Compute adaptive timestep to increment FSD at net rate in
-            !     each floe size category (gain - loss), and make sure we do
-            !     not overshoot actual time step:
-            zdt_sub = rDt_ice_fsd( pa_ifsd(:), zgain(:) - zloss(:) )
+            !     each floe size category (gain - loss):
+            CALL ice_fsd_timestep( 'ice_fsd_welding', pa_ifsd(:), zgain(:) - zloss(:), zdt_sub )
+
+            ! Make sure to not overshoot actual timestep:
             zdt_sub = MIN(zdt_sub, rDt_ice - ztelapsed)
 
             ! --- Update FSD and time elapsed:
@@ -652,7 +653,7 @@ CONTAINS
       !!                it forwards (for one thickness category) by one model
       !!                time step using adaptive time stepping (Horvat and
       !!                Tziperman, 2017). The adaptive time step is calculated
-      !!                by function rDt_ice_fsd().
+      !!                in routine ice_fsd_timestep.
       !!
       !! ** Input   :   pa_ifsd(nn_nfsd) : floe size distribution at one grid
       !!                                   point and for one thickness category
@@ -687,6 +688,7 @@ CONTAINS
       REAL(wp)                     ::   ztelapsed         ! time elapsed during adaptive time stepping
       INTEGER                      ::   isubt             ! to track number of adaptive time steps used
       INTEGER                      ::   jf                ! dummy loop index
+      CHARACTER(len=1)             ::   cln               ! string for warning print to indicate ice_thd_da vs ice_thd_do
       !
       INTEGER , PARAMETER          ::   isubt_max = 100   ! max. adaptive time steps before warning
       !!-------------------------------------------------------------------
@@ -724,6 +726,8 @@ CONTAINS
             ! Largest category: no 'floe flux' leaving this category:
             zdiv_fsd(nn_nfsd) = -pa_ifsd(nn_nfsd-1) / floe_dr(nn_nfsd-1)
 
+            cln = 'o'   ! for warning print, to indicate ice_thd_do is calling
+
          ELSE   ! pG_r < 0; lateral melt
             !
             ! Note 'flux' of floes from category jf+1 goes into category jf
@@ -753,6 +757,8 @@ CONTAINS
             ! Largest category: no 'floe flux' from larger category:
             zdiv_fsd(nn_nfsd) = -pa_ifsd(nn_nfsd) / floe_dr(nn_nfsd)
 
+            cln = 'a'   ! for warning print, to indicate ice_thd_da is calling
+
          ENDIF
 
          ! --- Correction term
@@ -776,8 +782,10 @@ CONTAINS
          ENDDO
 
          ! --- Compute adaptive timestep to increment FSD at this rate
-         !     and make sure we do not overshoot actual time step:
-         zdt_sub = rDt_ice_fsd( pa_ifsd(:), za_ifsd_tend(:) )
+         CALL ice_fsd_timestep( 'ice_thd_d'//cln//' -> ice_fsd_thd_evolve',   &
+            &                   pa_ifsd(:), za_ifsd_tend(:), zdt_sub )
+
+         ! Make sure we do not overshoot actual time step:
          zdt_sub = MIN(zdt_sub, rDt_ice - ztelapsed)
 
          ! --- Update FSD and elapsed time:
@@ -785,8 +793,8 @@ CONTAINS
          ztelapsed  = ztelapsed + zdt_sub
          isubt      = isubt + 1
 
-         IF( isubt > isubt_max ) THEN
-            CALL ctl_warn('ice_fsd_thd_evolve not converging: ',              &
+         IF( isubt == isubt_max ) THEN
+            CALL ctl_warn('ice_thd_d'//cln//' -> ice_fsd_thd_evolve not converging: ',   &
                &          ' reached maximum number of adaptive time steps')
          ENDIF
 
@@ -797,9 +805,9 @@ CONTAINS
    END SUBROUTINE ice_fsd_thd_evolve
 
 
-   FUNCTION rDt_ice_fsd( pa_ifsd_init, pa_ifsd_tend )
+   SUBROUTINE ice_fsd_timestep( cdcrn, pa_ifsd_init, pa_ifsd_tend, pDt )
       !!-------------------------------------------------------------------
-      !!                   *** FUNCTION rDt_ice_fsd ***
+      !!                   *** ROUTINE ice_fsd_timestep ***
       !!
       !! ** Purpose :   Calculate adaptive time step for evolving the floe
       !!                size distribution subject to lateral growth/melt
@@ -808,13 +816,13 @@ CONTAINS
       !!                current FSD at a specified rate, in each floe size
       !!                category. See Horvat and Tziperman (2017), Appendix A.
       !!
-      !! ** Input   :   pa_ifsd_init(nn_nfsd) : current value of FSD
+      !! ** Input   :   cdcrn                 : name of calling subroutine (for print in case of crash)
+      !!                pa_ifsd_init(nn_nfsd) : current value of FSD
       !!                pa_ifsd_tend(nn_nfsd) : required tendency of FSD
       !!
-      !! ** Output  :   rDt_ice_fsd         : maximum time step satisfying all
-      !!                                      restrictions in each floe size
-      !!                                      category and
-      !!                                      0 < rDt_ice_fsd <= rDt_ice
+      !! ** Output  :   pDt                   : maximum time step satisfying all
+      !!                                        restrictions in each floe size
+      !!                                        category and 0 < pDt <= rDt_ice
       !!
       !! ** References
       !!    ----------
@@ -824,13 +832,13 @@ CONTAINS
       !!
       !!-------------------------------------------------------------------
       !
-      REAL(wp), DIMENSION(nn_nfsd), INTENT(in) ::   pa_ifsd_init   ! current FSD
-      REAL(wp), DIMENSION(nn_nfsd), INTENT(in) ::   pa_ifsd_tend   ! required FSD tendency
+      CHARACTER(len=*)            , INTENT(in)    ::   cdcrn          ! calling routine name (for print in case of crash)
+      REAL(wp), DIMENSION(nn_nfsd), INTENT(in)    ::   pa_ifsd_init   ! current FSD
+      REAL(wp), DIMENSION(nn_nfsd), INTENT(in)    ::   pa_ifsd_tend   ! required FSD tendency
+      REAL(wp)                    , INTENT(inout) ::   pDt            ! adaptive time step (s)
       !
       REAL(wp), DIMENSION(nn_nfsd)             ::   zdt_restr    ! time step restrictions
       INTEGER                                  ::   jf           ! dummy loop index
-      !
-      REAL(wp) ::   rDt_ice_fsd   ! adaptive time step for FSD calculations
       !
       !!-------------------------------------------------------------------
 
@@ -851,9 +859,13 @@ CONTAINS
          ENDIF
       ENDDO
 
-      rDt_ice_fsd = MIN(rDt_ice, MINVAL(zdt_restr))
+      pDt = MIN(rDt_ice, MINVAL(zdt_restr))
 
-   END FUNCTION rDt_ice_fsd
+      IF( (pDt/rDt_ice) < epsi10 )    CALL ctl_stop('STOP', '',                    &
+         &  '   FSD tendency has become unstable during routine: '//TRIM(cdcrn),   &
+         &  '   (suggestion: reducing width of floe size categories may overcome the issue)')
+
+   END SUBROUTINE ice_fsd_timestep
 
 
    FUNCTION fsd_peri_dens( pfsd )

@@ -54,7 +54,15 @@ MODULE sbc_oce
    !                                             !:  = 1 global mean of e-p-r set to zero at each nn_fsbc time step
    !                                             !:  = 2 annual global mean of e-p-r set to zero
    LOGICAL , PUBLIC ::   ln_icebergs    !: Icebergs
+   LOGICAL , PUBLIC ::   ln_berg_cpl    !: use coupling with SAB to compute icebergs outside of NEMO.
+   LOGICAL , PUBLIC ::   ln_cpl_asynchrone  !: In case of coupling with SAB, use synchrone reception of berg fluxes or not
+                                                 !: .true.  : for reproducibility check, comparisons with reference NEMO 5
+                                                 !: .false. : for performance runs, reception of berg fluxes is desynchronized.
+   LOGICAL , PUBLIC ::   ln_cpl_nlvlcut  !: In case of coupling with SAB, with ln_M2016 = .true. , reduces the number of vertical levels to be sent though OASIS 
+   INTEGER , PUBLIC ::   nn_lvlcut_cpl  !: if ln_cpl_nlvlcut : enables user to set a given number of vertical levels to be sent
+   INTEGER , PUBLIC ::   nlvlsab_cpl   ! number of vertical levels effectively used in NEMO-SAB coupling, after processing parameters in icbini
    !
+!
    INTEGER , PUBLIC ::   nn_lsm         !: Number of iteration if seaoverland is applied
    !
    !                                   !!* namsbc_cpl namelist *
@@ -101,6 +109,8 @@ MODULE sbc_oce
    !  (internal OASIS coupling)
    INTEGER , PUBLIC, PARAMETER ::   jp_iam_sas  = 2      !: Multi executable configuration - SAS component
    !  (internal OASIS coupling)
+   INTEGER , PUBLIC, PARAMETER ::   jp_iam_icb  = 3      !: Multi executable configuration - SAS component
+   !
    !!----------------------------------------------------------------------
    !!              Ocean Surface Boundary Condition fields
    !!----------------------------------------------------------------------
@@ -120,6 +130,7 @@ MODULE sbc_oce
    REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:) ::   qns    , qns_b     !: sea heat flux: non solar                      [W/m2]
    REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:) ::   qsr_tot            !: total     solar heat flux (over sea and ice)  [W/m2]
    REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:) ::   qns_tot            !: total non solar heat flux (over sea and ice)  [W/m2]
+   REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:) :: icb_wflx, icb_hcflx         !JOJO DEV : adding icb_emp, icb_qns saving arrays to store SAB's fluxes in coupled mode:
    REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:) ::   emp    , emp_b     !: freshwater budget: volume flux                [Kg/m2/s]
    REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:) ::   sfx    , sfx_b     !: salt flux                                     [PSS.kg/m2/s]
    REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:) ::   emp_tot            !: total E-P over ocean and ice                  [Kg/m2/s]
@@ -200,8 +211,8 @@ CONTAINS
       ! == REDUCED ARRAYS == !
       ! -------------------- !
       ALLOCATE( qns    (A2D(0))    , qns_b  (A2D(0))     , qsr   (A2D(0)),    &
-         &      qns_tot(A2D(0))    , qsr_tot(A2D(0))     ,                    &
-         &      STAT=ierr(5) )
+         &      qns_tot(A2D(0))    , qsr_tot(A2D(0))     , icb_wflx(A2D(0)),   &
+         &      icb_hcflx(A2D(0)),   STAT=ierr(5) )
       !
       ALLOCATE( sbc_tsc(A2D(0),jpts) , sbc_tsc_b(A2D(0),jpts) ,  &
          &      sfx (A2D(0)) , sfx_b(A2D(0)) , emp_tot(A2D(0)), fwfice(A2D(0)), fwficb(A2D(0)), &

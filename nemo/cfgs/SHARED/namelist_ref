@@ -629,6 +629,10 @@
 &namberg       !   iceberg parameters                                   (default: OFF)
 !-----------------------------------------------------------------------
    ln_icebergs = .false.      ! activate iceberg floats (force =F with "key_agrif")
+         ln_berg_cpl = .false. ! activate externalized iceberg computation (see SAB)
+         ln_cpl_asynchrone = .false. ! In case of coupling with SAB, use synchrone reception of berg fluxes or not
+                                !: .true.  : for reproducibility check, comparisons with reference NEMO 5
+                                !: .false. : for performance runs, reception of berg fluxes is desynchronized.
    !
    !                          ! restart
    cn_icbrst_in     = "restart_icb" !  suffix of iceberg restart name (input)
@@ -675,6 +679,9 @@
    ln_M2016                = .false. ! use Merino et al. (2016) modification (use of 3d ocean data instead of only sea surface data)
       ln_icb_grd           = .false. ! ground icb when icb bottom level hit oce bottom level (need ln_M2016 to be activated)
    !
+         ln_cpl_nlvlcut  = .false.
+         nn_lvlcut_cpl  = -1      
+   !
    ln_icb_bas   = .false.  ! activate diagnostics by basin
       cn_icbbasins_file       = 'icbbasinid.nc' ! file defining the basin location
       cn_icbbasins_var2d      = 'basinid'       ! basin id map
@@ -706,7 +713,6 @@
 !!                                                                    !!
 !!   namlbc        lateral momentum boundary condition                  (default: NO selection)
 !!   namagrif      agrif nested grid   (read by child model only)       ("key_agrif")
-!!   nam_tide      Tidal forcing                                        (default: OFF)
 !!   nambdy        Unstructured open boundaries                         (default: OFF)
 !!   nambdy_dta    Unstructured open boundaries - external data         (see  nambdy)
 !!   nambdy_tide   tidal forcing at open boundaries                     (default: OFF)
@@ -731,23 +737,6 @@
    rn_sponge_dyn   = 0.002   !  coefficient for dynamics sponge layer []
    rn_trelax_tra   = 0.01    !  inverse of relaxation time (in steps) for tracers []
    rn_trelax_dyn   = 0.01    !  inverse of relaxation time (in steps) for dynamics []
-/
-!-----------------------------------------------------------------------
-&nam_tide      !   tide parameters                                      (default: OFF)
-!-----------------------------------------------------------------------
-   ln_tide     = .false.      ! Activate tides
-      nn_tide_var   = 1          !  Variant of tidal parameter set and tide-potential computation
-      !                          !     (1: default; 0: compatibility with previous versions)
-      ln_tide_pot   = .false.               !  use tidal potential forcing
-         rn_tide_gamma = 0.7                   ! Tidal tilt factor
-         ln_scal_load  = .false.               ! Use scalar approximation for
-            rn_scal_load = 0.094               !     load potential
-         ln_read_load  = .false.               ! Or read load potential from file
-            cn_tide_load = 'tide_LOAD_grid_T.nc'  ! filename for load potential
-            !
-      ln_tide_ramp  = .false.               !  Use linear ramp for tides at startup
-         rn_tide_ramp_dt = 0.               !  ramp duration in days
-      sn_tide_cnames(1) = 'DUMMY'               !  name of constituent - all tidal components must be set in namelist_cfg
 /
 !-----------------------------------------------------------------------
 &nambdy        !  unstructured open boundaries                          (default: OFF)
@@ -892,6 +881,35 @@
       nn_bbl_adv  =  0        !  advective bbl (=1/2) or not (=0)
       rn_ahtbbl   =  1000.    !  lateral mixing coefficient in the bbl  [m2/s]
       rn_gambbl   =  10.      !  advective bbl coefficient                 [s]
+/
+
+!!======================================================================
+!!           ***  Tides, self-attraction, and loading  ***            !!
+!!                                                                    !!
+!!   namtsl_tde   Tidal parameters and forcing                          (default: OFF)
+!!   namtsl_sal   SAL-potential parameterisations                       (default: OFF)
+!!======================================================================
+!
+!-----------------------------------------------------------------------
+&namtsl_tde    !   tide parameters                                      (default: OFF)
+!-----------------------------------------------------------------------
+   ln_tsltde = .false.                      ! Flag to indicate the activation of tidal constituents
+      cn_tsltde_constituent(01) = 'DUMMY'      ! Name of constituent 1 (further constituents can be activated through enumeration)
+      nn_tsltde_var             = 1            ! Variant of tidal parameter set and tide-potential computation
+      !                                        !    (1: default; 0: compatibility with previous versions)
+      ln_tsltde_pot             = .false.      ! Flag to indicate the application of a tide-generating potential
+         rn_tsltde_gamma           = 0.7          ! Tidal tilt factor
+      ln_tsltde_ramp            = .false.      ! Flag to indicate the phasing in of tidal forcing
+         rn_tsltde_ramp_dt         = 0.           ! Phasing-in duration (days)
+/
+!-----------------------------------------------------------------------
+&namtsl_sal    !   SAL-potential parameterisations                      (default: OFF)
+!-----------------------------------------------------------------------
+   ln_tslsal = .false.              ! Activate SAL potential
+      ln_tslsal_scalar = .false.    ! Use scalar SAL-potential parameterisation (proportional to SSH)
+         rn_tslsal_scalar = 0.094   ! Coefficient for scalar SAL-potential parameterisation
+      ln_tslsal_osc = .false.       ! Use tidal oscillatory SAL-potential parameterisation (for constituents selected in namtsl_tde)
+         cn_tslsal_osc = ''         ! Filename for tidal-analysis input
 /
 
 !!======================================================================
@@ -1572,6 +1590,8 @@
    nn_jsplt    =    1             !  number of processors in j-direction
    ln_timing   = .false.          !  timing by routine write out in timing.output file
    ln_diacfl   = .false.          !  CFL diagnostics write out in cfl_diagnostics.ascii
+   nn_npfchk   =    0             !  Control NPF duplicated line identity
+                                  !  0:no check, 1:verbose checking, 2:stop if NPF mismatch
 /
 !-----------------------------------------------------------------------
 &namsto        ! Stochastic parametrization of EOS                      (default: OFF)

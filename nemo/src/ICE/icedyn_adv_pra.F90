@@ -470,7 +470,6 @@ CONTAINS
          ! --- Lateral boundary conditions --- !
          !     caution: for gradients (sx and sy) the sign changes
          !              plus, one needs ldfull=T to deal with the NorthFold
-         IF( ihls == 0 .AND. jt /= icycle ) THEN ! comm. on all fields if ihls=0 and we are only at the 1st iteration (jt=1) over 2 (icycle=2) 
             !
             IF ( ln_pnd_LEV .OR. ln_pnd_TOPO ) THEN
                CALL lbc_lnk( 'icedyn_adv_pra', pv_i  , 'T', 1._wp, sxice , 'T', -1._wp, syice , 'T', -1._wp  & ! ice volume
@@ -518,57 +517,11 @@ CONTAINS
                CALL lbc_lnk( 'icedyn_adv_pra', pa_ifsd,'T', 1._wp, sxfsd , 'T', -1._wp, syfsd , 'T', -1._wp  & ! floe size distribution
                   &                          , sxxfsd, 'T', 1._wp, syyfsd, 'T',  1._wp, sxyfsd, 'T',  1._wp, ldfull = .TRUE. )
             ENDIF 
+
+            CALL lbc_lnk( 'icedyn_adv_pra', pato_i  , 'T', 1._wp, ldfull = .TRUE. )
+            CALL lbc_lnk( 'icedyn_adv_pra', wfx_res  , 'T', 1._wp, hfx_res  , 'T', 1._wp, sfx_res  , 'T', 1._wp, ldfull = .TRUE. )
+
             !
-         ELSEIF( jt == icycle ) THEN             ! comm. on the moments at the end of advection
-            !                                    ! comm. on the other fields are gathered in icedyn.F90
-            IF ( ln_pnd_LEV .OR. ln_pnd_TOPO ) THEN
-               CALL lbc_lnk( 'icedyn_adv_pra', sxice , 'T', -1._wp, syice , 'T', -1._wp  &                   ! ice volume
-                  &                          , sxxice, 'T',  1._wp, syyice, 'T',  1._wp, sxyice, 'T',  1._wp &
-                  &                          , sxsn  , 'T', -1._wp, sysn  , 'T', -1._wp  &                   ! snw volume
-                  &                          , sxxsn , 'T',  1._wp, syysn , 'T',  1._wp, sxysn , 'T',  1._wp &
-                  &                          , sxsal , 'T', -1._wp, sysal , 'T', -1._wp  &                   ! ice salinity
-                  &                          , sxxsal, 'T',  1._wp, syysal, 'T',  1._wp, sxysal, 'T',  1._wp &
-                  &                          , sxa   , 'T', -1._wp, sya   , 'T', -1._wp  &                   ! ice concentration
-                  &                          , sxxa  , 'T',  1._wp, syya  , 'T',  1._wp, sxya  , 'T',  1._wp &
-                  &                          , sxage , 'T', -1._wp, syage , 'T', -1._wp  &                   ! ice age
-                  &                          , sxxage, 'T',  1._wp, syyage, 'T',  1._wp, sxyage, 'T',  1._wp &
-                  &                          , sxap  , 'T', -1._wp, syap  , 'T', -1._wp  &                   ! melt pond fraction
-                  &                          , sxxap , 'T',  1._wp, syyap , 'T',  1._wp, sxyap , 'T',  1._wp &
-                  &                          , sxvp  , 'T', -1._wp, syvp  , 'T', -1._wp  &                   ! melt pond volume
-                  &                          , sxxvp , 'T',  1._wp, syyvp , 'T',  1._wp, sxyvp , 'T',  1._wp &
-                  &                          , sxvl  , 'T', -1._wp, syvl  , 'T', -1._wp  &                   ! melt pond lid volume
-                  &                          , sxxvl , 'T',  1._wp, syyvl , 'T',  1._wp, sxyvl, 'T',  1._wp, ldfull = .TRUE. )
-            ELSE
-               CALL lbc_lnk( 'icedyn_adv_pra', sxice , 'T', -1._wp, syice , 'T', -1._wp  &                   ! ice volume
-                  &                          , sxxice, 'T',  1._wp, syyice, 'T',  1._wp, sxyice, 'T',  1._wp &
-                  &                          , sxsn  , 'T', -1._wp, sysn  , 'T', -1._wp  &                   ! snw volume
-                  &                          , sxxsn , 'T',  1._wp, syysn , 'T',  1._wp, sxysn , 'T',  1._wp &
-                  &                          , sxsal , 'T', -1._wp, sysal , 'T', -1._wp  &                   ! ice salinity
-                  &                          , sxxsal, 'T',  1._wp, syysal, 'T',  1._wp, sxysal, 'T',  1._wp &
-                  &                          , sxa   , 'T', -1._wp, sya   , 'T', -1._wp  &                   ! ice concentration
-                  &                          , sxxa  , 'T',  1._wp, syya  , 'T',  1._wp, sxya  , 'T',  1._wp &
-                  &                          , sxage , 'T', -1._wp, syage , 'T', -1._wp  &                   ! ice age
-                  &                          , sxxage, 'T',  1._wp, syyage, 'T',  1._wp, sxyage, 'T',  1._wp, ldfull = .TRUE. )
-            ENDIF
-            IF( nn_icesal == 4 ) THEN
-               CALL lbc_lnk( 'icedyn_adv_pra', sxc0  , 'T', -1._wp, syc0  , 'T', -1._wp  &                   ! snw enthalpy
-                  &                          , sxxc0 , 'T',  1._wp, syyc0 , 'T',  1._wp, sxyc0 , 'T',  1._wp &
-                  &                          , sxe   , 'T', -1._wp, sye   , 'T', -1._wp  &                   ! ice enthalpy
-                  &                          , sxxe  , 'T',  1._wp, syye  , 'T',  1._wp, sxye  , 'T',  1._wp &
-                  &                          , sxsi  , 'T', -1._wp, sysi  , 'T', -1._wp  &                   ! ice salt content
-                  &                          , sxxsi , 'T',  1._wp, syysi , 'T',  1._wp, sxysi , 'T',  1._wp, ldfull = .TRUE. )
-            ELSE
-               CALL lbc_lnk( 'icedyn_adv_pra', sxc0  , 'T', -1._wp, syc0  , 'T', -1._wp  &                   ! snw enthalpy
-                  &                          , sxxc0 , 'T',  1._wp, syyc0 , 'T',  1._wp, sxyc0 , 'T',  1._wp &
-                  &                          , sxe   , 'T', -1._wp, sye   , 'T', -1._wp  &                   ! ice enthalpy
-                  &                          , sxxe  , 'T',  1._wp, syye  , 'T',  1._wp, sxye  , 'T',  1._wp, ldfull = .TRUE. )
-            ENDIF
-            IF ( ln_fsd ) THEN
-               CALL lbc_lnk( 'icedyn_adv_pra', sxfsd , 'T', -1._wp, syfsd , 'T', -1._wp  &                   ! floe size distribution
-                  &                          , sxxfsd, 'T',  1._wp, syyfsd, 'T',  1._wp, sxyfsd , 'T',  1._wp, ldfull = .TRUE. )
-            ENDIF
-            !
-         ENDIF
          !
       END DO ! jt
       !

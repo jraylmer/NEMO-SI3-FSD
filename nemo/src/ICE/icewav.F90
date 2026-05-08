@@ -30,9 +30,7 @@ MODULE icewav
    USE par_ice           ! SI3 parameters
    USE phycst , ONLY :   rpi, grav, rhoi
    USE sbc_oce, ONLY :   wndm, ln_wave, ln_wave_spec, nn_nwfreq            ! SBC module
-   USE sbcwave, ONLY :   hsw, wpf, wmp, wfreq, wfreq_l, wfreq_u, wdfreq,   &
-      &                                 wlam , wlam_l , wlam_u , wdlam ,   &
-      &                                 wknum, wspec                       ! SBC: wave variables
+   USE sbcwave           ! SBC wave variables
    USE ice               ! sea-ice: variables
    USE icefsd , ONLY :   a_ifsd, nf_newice, floe_rl, floe_rc, floe_ru, floe_dr   ! floe size distribution parameters/variables
    USE icefsd , ONLY :   ice_fsd_timestep, ice_fsd_cor, ice_fsd_dia              ! floe size distribution routines
@@ -2015,10 +2013,12 @@ CONTAINS
          !
          ! Wave-ice interactions module requires both wave inputs and FSD
          ! (exception: fracture scheme is Z16, in which case only FSD is needed)
-         IF( (nn_frac_scheme /= jpfrac_z16) .AND. .NOT. ln_wave )   &
-            &                CALL ctl_stop('ice_wav_init: ln_ice_wav=T but SBC wave module inactive (ln_wave=F)')
-         !
-         IF( .NOT. ln_fsd  ) CALL ctl_stop('ice_wav_init: ln_ice_wav=T but FSD inactive (ln_fsd=F)')
+         IF( (nn_frac_scheme /= jpfrac_z16) .AND. .NOT. ln_wave ) THEN
+            CALL ctl_stop('ice_wav_init: need to activate SBC wave module (ln_wave=T) for your choice of nn_frac_scheme')
+         ENDIF
+         IF( .NOT. ln_fsd  ) THEN
+            CALL ctl_stop('ice_wav_init: wave-ice interactions require floe size distribution (ln_fsd=T)')
+         ENDIF
 
          ! Warn if both attenuation scheme and reading of full wave spectrum selected
          ! (possible to do so, but usually spectrum comes from a coupled wave model so
@@ -2026,8 +2026,69 @@ CONTAINS
          !
          ! (check that spectrum is actually read in is done in sbc_wave_init)
          !
-         IF( ln_ice_wav_attn .AND. ln_ice_wav_spec )   &
-            &   CALL ctl_warn('ice_wav_init: ln_ice_wav_attn=T but also using spectrum (ln_ice_wav_spec=T): intentional?')
+         IF( ln_ice_wav_attn ) THEN
+            IF ( ln_ice_wav_spec ) THEN
+               CALL ctl_warn('ice_wav_init: ln_ice_wav_attn=T but also using spectrum (ln_ice_wav_spec=T): intentional?')
+            ENDIF
+            IF ( nn_frac_scheme == jpfrac_z16 ) THEN
+               ln_ice_wav_attn = .FALSE.
+               CALL ctl_warn('ice_wav_init: ask for attenuation scheme but using Z16 fracture scheme',   &
+                  &          '==>> we force ln_ice_wav_attn = F anyway: attenuation scheme is NOT used')
+            ENDIF
+         ENDIF
+
+         ! Inform SBC wave module which fields need to be read for wave-ice interactions
+         !
+         ! See sbcwave: l_ini_* determines whether field is allocated/initialised
+         !              l_get_* determines whether it is read (from file or coupled wave model)
+         !
+         ! Never set these flags to F, as they may be needed for other purposes that have already
+         ! set them to T. If l_get_VAR=T then the corresponding l_ini_VAR need not be set as it
+         ! will be set to T in sbc_wave_init anyway if l_get_VAR=T.
+         !
+         SELECT CASE( nn_frac_scheme )
+            CASE( jpfrac_y24a )
+               !
+               l_get_hsig = .TRUE.
+               l_get_wper = .TRUE.
+               !
+            CASE( jpfrac_y24b )
+               !
+               IF( ln_ice_wav_spec ) THEN   ;   l_get_wspec = .TRUE.
+               ELSE                         ;   l_get_hsig  = .TRUE.   ;   l_get_wpf   = .TRUE.
+               ENDIF
+               !
+               l_ini_wspec = .TRUE.   ! needed either way (though redundant for ln_ice_wav_spec=T case)
+               !
+               ! If attenuation scheme active, wmp/wper calculated from attenuated spectrum
+               ! If not, need to read it directly:
+               IF( .NOT. ln_ice_wav_attn )      l_get_wper  = .TRUE.
+               !
+            CASE( jpfrac_ht15 )
+               !
+               IF( ln_ice_wav_spec ) THEN   ;   l_get_wspec = .TRUE.
+               ELSE                         ;   l_get_hsig  = .TRUE.   ;   l_get_wpf   = .TRUE.
+               ENDIF
+               l_ini_wspec = .TRUE.   ! needed either way (though redundant for ln_ice_wav_spec=T case)
+               !
+            CASE( jpfrac_z16  )
+               ! => no wave fields needed; do not update SBC flags
+            CASE DEFAULT
+               ! Use this opportunity to stop as invalid value given for nn_frac_scheme:
+               CALL ctl_stop('STOP', 'ice_wav_init: invalid option for nn_frac_scheme')
+         END SELECT
+
+         ! Wave-dependent growth: need wave peak frequency and sig. wave height:
+         IF( nn_frac_scheme /= jpfrac_z16 ) THEN
+            l_get_hsig  = .TRUE.   ;   l_get_wpf  = .TRUE.
+         ENDIF
+
+         ! Wave attenuation scheme: ensure required arrays are at least allocated, and rely on
+         ! above to determine which fields are actually read in:
+         IF( ln_ice_wav_attn ) THEN
+            l_ini_wspec = .TRUE.   ;   l_ini_hsig = .TRUE.
+            l_ini_wpf   = .TRUE.   ;   l_ini_wper = .TRUE.
+         ENDIF
 
          ! Allocate and define module constants
          !
@@ -2124,9 +2185,9 @@ CONTAINS
 
          ! Similar for routine ice_wav_attn (attenuation scheme): it will need to compute the wave
          ! spectrum everywhere (regardless of ice presence) only if the wave spectrum is NOT read in:
-         l_attn_calc_spec = .NOT. ln_ice_wav_spec
+         l_attn_calc_spec = ln_ice_wav_attn .AND. .NOT. ln_ice_wav_spec
 
-         IF(lwp) THEN
+         IF(lwp) THEN   ! this was mainly for testing -- not useful to user so could be removed?
             WRITE(numout,*) ''
             WRITE(numout,*) '   Namelist options ==> wave fracture    scheme will calculate spectrum = ', l_frac_calc_spec
             WRITE(numout,*) '                    ==> wave attenuation scheme will calculate spectrum = ', l_attn_calc_spec

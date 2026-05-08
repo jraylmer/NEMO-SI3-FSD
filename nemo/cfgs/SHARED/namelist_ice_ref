@@ -371,7 +371,6 @@
                                       ! (note: if T, also need ln_fsd=T in namfsd and ln_wave=T in namsbc)
                    ! -- input/config  -- !
       ln_ice_wav_spec = .false.          ! read full wave energy spectrum from wave model or forcing
-                                         !   (note: if T, also need ln_wave_spec=T in namsbc_wave)
                    ! -- attenuation   -- !
       ln_ice_wav_attn = .false.          ! activate wave-in-ice attenuation scheme (Roach et al. 2018)
          rn_attn_lam_tol = 1.5           !   longitude tolerance for identifying meridians (degrees east)

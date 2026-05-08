@@ -52,6 +52,34 @@ MODULE sbcwave
    LOGICAL, PUBLIC ::   cpl_wpf           = .FALSE.
    LOGICAL, PUBLIC ::   cpl_wspec         = .FALSE.
 
+   ! Variables checking if certain wave fields need to be allocated/initialised (l_ini_*)
+   !                                and/or retrieved from file or coupled model (l_get_*)
+   !
+   ! In the latter case, existing cpl_* flags determine whether from file or coupled model
+   !
+   ! This is to help setting of various combinations of requirements for wave-ice
+   ! interaction module (icewav) and accommodate Stokes drift correction (ln_sdw).
+   !
+   ! (Might be cleaner to replace the jpfld/jp_usd/jp_vsd below completely which I already
+   ! partially changed by separating out reading of hsig and wmp from sf_sd)
+   !
+   ! The reason for two sets of flags is that some wave-ice options require arrays to be
+   ! allocated and initialised even though data does not need to be read into them, e.g.:
+   !    1) wave in ice attenuation scheme active (ln_ice_wav_attn = TRUE)
+   !    2) wave-ice fracture scheme selection that requires wave energy spectrum and
+   !       related arrays for calculations even though the spectrum is being calculated
+   !       from hsig and wpf
+   ! -Jake
+   LOGICAL, PUBLIC ::   l_ini_hsig  = .FALSE.
+   LOGICAL, PUBLIC ::   l_ini_wper  = .FALSE.
+   LOGICAL, PUBLIC ::   l_ini_wpf   = .FALSE.
+   LOGICAL, PUBLIC ::   l_ini_wspec = .FALSE.
+
+   LOGICAL, PUBLIC ::   l_get_hsig  = .FALSE.
+   LOGICAL, PUBLIC ::   l_get_wper  = .FALSE.
+   LOGICAL, PUBLIC ::   l_get_wpf   = .FALSE.
+   LOGICAL, PUBLIC ::   l_get_wspec = .FALSE.
+
    INTEGER ::   jpfld    ! number of files to read for stokes drift
    INTEGER ::   jp_usd   ! index of stokes drift  (i-component) (m/s)    at T-point
    INTEGER ::   jp_vsd   ! index of stokes drift  (j-component) (m/s)    at T-point
@@ -319,22 +347,22 @@ CONTAINS
       ENDIF
 
       IF( .NOT. ln_wave_test ) THEN
-         IF( ln_wave_spec .AND. .NOT. cpl_wspec ) THEN  !== Wave energy spectrum ==!
+         IF( l_get_wspec .AND. .NOT. cpl_wspec ) THEN  !== Wave energy spectrum ==!
             CALL fld_read( kt, nn_fsbc, sf_wspec )
             wspec(:,:,:) = sf_wspec(1)%fnow(:,:,:) * SPREAD(tmask(:,:,1), 3, nn_nwfreq)  ! wave energy spectrum at T point (function of frequency)
          ENDIF
 
-         IF( ln_ice_wav .AND. .NOT. cpl_wpf ) THEN      !== Peak Frequency ==!
+         IF( l_get_wpf .AND. .NOT. cpl_wpf ) THEN      !== Peak Frequency ==!
             CALL fld_read( kt, nn_fsbc, sf_wpf )
             wpf(:,:) = sf_wpf(1)%fnow(:,:,1) * tmask(:,:,1)  ! wave peak frequency at T point
          ENDIF
 
-         IF( (ln_sdw .OR. ln_ice_wav) .AND. .NOT. cpl_hsig ) THEN   !== Significant Wave Height ==!
+         IF( l_get_hsig .AND. .NOT. cpl_hsig ) THEN   !== Significant Wave Height ==!
             CALL fld_read( kt, nn_fsbc, sf_hsw )
             hsw(:,:) = sf_hsw(1)%fnow(:,:,1) * tmask(:,:,1)  ! significant wave height at T point
          ENDIF
 
-         IF( (ln_sdw .OR. ln_ice_wav) .AND. .NOT. cpl_wper ) THEN   !== Wave Mean Period ==!
+         IF( l_get_wper .AND. .NOT. cpl_wper ) THEN   !== Wave Mean Period ==!
             CALL fld_read( kt, nn_fsbc, sf_wmp )
             wmp(:,:) = sf_wmp(1)%fnow(:,:,1) * tmask(:,:,1)  ! wave mean period at T point
          ENDIF
@@ -407,6 +435,10 @@ CONTAINS
          ln_taw   = .FALSE.
          ln_phioc = .FALSE.
          ln_stshear = .FALSE.
+         l_get_hsig = .FALSE.
+         l_get_wper = .FALSE.
+         l_get_wpf = .FALSE.
+         l_get_wspec = .FALSE.
          RETURN
       ENDIF
       !
@@ -463,15 +495,29 @@ CONTAINS
       !
       IF( ln_ice_wav ) THEN
          !
-         IF( ln_ice_wav_spec .AND. .NOT.ln_wave_spec )   &
-            &   CALL ctl_stop( 'ln_ice_wav_spec=T but spectrum NOT read because ln_wave_spec=F')
-         !
+         IF( ln_ice_wav_spec .AND. .NOT.ln_wave_spec ) THEN
+            ln_wave_spec = .TRUE.
+            CALL ctl_warn( 'ln_ice_wav_spec=T but ln_wave_spec=F', '==>> we set ln_wave_spec=T anyway')
+         ENDIF
          ! Warn if spectrum is being read but not used by icewav module (possible to do so, but strange to
          ! read full wave spectrum and *not* use it for wave breakup, so possibly a user oversight):
          IF( .NOT.ln_ice_wav_spec .AND. ln_wave_spec )   &
             &   CALL ctl_warn('ln_ice_wav_spec=F but spectrum IS being read in (ln_wave_spec=T); intentional?')
          !
       ENDIF
+
+      ! Update flags for whether certain fields need to be read or not (l_get_*) and/or used (l_use_*)
+      !
+      ! Currently only done for those needed by either Stokes drift correction or wave-ice interactions
+      ! Note these are possibly set to T in ice_wav_init (comes before this routine), hence use of .OR. here:
+      l_get_hsig  = l_get_hsig  .OR. ln_sdw
+      l_get_wper  = l_get_wper  .OR. ln_sdw
+      l_get_wspec = l_get_wspec .OR. ln_wave_spec
+
+      l_ini_hsig  = l_ini_hsig  .OR. l_get_hsig    ! note: might need to allocate/initialise even if not reading data
+      l_ini_wper  = l_ini_wper  .OR. l_get_wper    ! (i.e., RHS could currently be T .OR. F if set in ice_wav_init)
+      l_ini_wpf   = l_ini_wpf   .OR. l_get_wpf
+      l_ini_wspec = l_ini_wspec .OR. l_get_wspec
 
       !            !== Check options for setting frequencies for wave spectrum ==!
       !
@@ -480,63 +526,65 @@ CONTAINS
 
       !                !==  Set frequency arrays for wave energy spectrum  ==!
       !
-      ALLOCATE( wfreq_l(nn_nwfreq), wfreq(nn_nwfreq), wfreq_u(nn_nwfreq), wdfreq(nn_nwfreq),   &
-         &      wlam_l (nn_nwfreq), wlam (nn_nwfreq), wlam_u (nn_nwfreq), wdlam (nn_nwfreq),   &
-         &      wknum  (nn_nwfreq))
-      !
-      IF( ln_wfreq_usr ) THEN
+      IF( l_ini_wspec ) THEN
+         ALLOCATE( wfreq_l(nn_nwfreq), wfreq(nn_nwfreq), wfreq_u(nn_nwfreq), wdfreq(nn_nwfreq),   &
+            &      wlam_l (nn_nwfreq), wlam (nn_nwfreq), wlam_u (nn_nwfreq), wdlam (nn_nwfreq),   &
+            &      wknum  (nn_nwfreq))
          !
-         ! !== Set bounds from namelist ==!
-         !
-         wfreq_l(:) = rn_wfreq_usr(1:nn_nwfreq  )   ! lower limit of frequency bins
-         wfreq_u(:) = rn_wfreq_usr(2:nn_nwfreq+1)   ! upper limit of frequency bins
-         !
-         IF( ln_wfreq_usr_exp ) THEN
-            ! Put frequencies at fixed-ratio spacing assuming bin limits are exponentially spaced:
-            DO jf = 1, nn_nwfreq
-               wfreq(jf) = SQRT( wfreq_u(jf) / wfreq_l(jf) ) * wfreq_l(jf)
-            ENDDO
+         IF( ln_wfreq_usr ) THEN
+            !
+            ! !== Set bounds from namelist ==!
+            !
+            wfreq_l(:) = rn_wfreq_usr(1:nn_nwfreq  )   ! lower limit of frequency bins
+            wfreq_u(:) = rn_wfreq_usr(2:nn_nwfreq+1)   ! upper limit of frequency bins
+            !
+            IF( ln_wfreq_usr_exp ) THEN
+               ! Put frequencies at fixed-ratio spacing assuming bin limits are exponentially spaced:
+               DO jf = 1, nn_nwfreq
+                  wfreq(jf) = SQRT( wfreq_u(jf) / wfreq_l(jf) ) * wfreq_l(jf)
+               ENDDO
+            ELSE
+               ! Put frequencies at mid-points of bin limits:
+               wfreq(:) = .5_wp * (wfreq_l(:) + wfreq_u(:))
+            ENDIF
+            !
          ELSE
-            ! Put frequencies at mid-points of bin limits:
-            wfreq(:) = .5_wp * (wfreq_l(:) + wfreq_u(:))
+            ! !== Calculate exponentially-spaced frequency bin intervals such that f(n) = k*f(n-1) ==!
+            !
+            ! In general, frequency fn = f0 * k^n, for n = 0, 1, ..., corresponding to the bin boundaries,
+            ! and n = 1/2, 3/2, ... corresponding to the 'central' values used in calculations. This is all
+            ! determined by f0, k, and nn_wfreq (rn_wfreq_0, rn_wfreq_k, and nn_nwfreq, respectively)
+            !
+            wfreq_l(1) =                    rn_wfreq_0   ! lower limit of lowest frequency bin
+            wfreq  (1) = SQRT(rn_wfreq_k) * rn_wfreq_0   ! 'central' frequency of lowest frequency bin
+            wfreq_u(1) =       rn_wfreq_k * rn_wfreq_0   ! upper limit of lowest frequency bin
+            !
+            DO jf = 2, nn_nwfreq
+               wfreq_l(jf) = rn_wfreq_k * wfreq_l(jf-1)
+               wfreq  (jf) = rn_wfreq_k * wfreq  (jf-1)
+               wfreq_u(jf) = rn_wfreq_k * wfreq_u(jf-1)
+            ENDDO
+            !
          ENDIF
-         !
-      ELSE
-         ! !== Calculate exponentially-spaced frequency bin intervals such that f(n) = k*f(n-1) ==!
-         !
-         ! In general, frequency fn = f0 * k^n, for n = 0, 1, ..., corresponding to the bin boundaries,
-         ! and n = 1/2, 3/2, ... corresponding to the 'central' values used in calculations. This is all
-         ! determined by f0, k, and nn_wfreq (rn_wfreq_0, rn_wfreq_k, and nn_nwfreq, respectively)
-         !
-         wfreq_l(1) =                    rn_wfreq_0   ! lower limit of lowest frequency bin
-         wfreq  (1) = SQRT(rn_wfreq_k) * rn_wfreq_0   ! 'central' frequency of lowest frequency bin
-         wfreq_u(1) =       rn_wfreq_k * rn_wfreq_0   ! upper limit of lowest frequency bin
-         !
-         DO jf = 2, nn_nwfreq
-            wfreq_l(jf) = rn_wfreq_k * wfreq_l(jf-1)
-            wfreq  (jf) = rn_wfreq_k * wfreq  (jf-1)
-            wfreq_u(jf) = rn_wfreq_k * wfreq_u(jf-1)
-         ENDDO
-         !
-      ENDIF
 
-      wdfreq(:) = wfreq_u(:) - wfreq_l(:)   ! width of frequency bins
+         wdfreq(:) = wfreq_u(:) - wfreq_l(:)   ! width of frequency bins
 
-      ! Wavelengths corresponding to wfreq* arrays (note wlam* therefore are in decreasing order)
-      ! Assume dispersion relation for deep-water surface gravity waves:
-      wlam_l(:) = grav / (2._wp * rpi * wfreq_u(:)**2)
-      wlam  (:) = grav / (2._wp * rpi * wfreq  (:)**2)
-      wlam_u(:) = grav / (2._wp * rpi * wfreq_l(:)**2)
-      wdlam (:) = wlam_u(:) - wlam_l(:)
-      wknum (:) = 2._wp * rpi / wlam(:)   ! angular wavenumber
+         ! Wavelengths corresponding to wfreq* arrays (note wlam* therefore are in decreasing order)
+         ! Assume dispersion relation for deep-water surface gravity waves:
+         wlam_l(:) = grav / (2._wp * rpi * wfreq_u(:)**2)
+         wlam  (:) = grav / (2._wp * rpi * wfreq  (:)**2)
+         wlam_u(:) = grav / (2._wp * rpi * wfreq_l(:)**2)
+         wdlam (:) = wlam_u(:) - wlam_l(:)
+         wknum (:) = 2._wp * rpi / wlam(:)   ! angular wavenumber
 
-      IF(lwp) THEN
-         WRITE(numout,*)
-         WRITE(numout,*) '      Frequency (Hz) bins for discretised wave spectrum (n / lower bound / frequency / upper bound):'
-         DO jf = 1, nn_nwfreq
-            WRITE(numout,*) '      ', jf, wfreq_l(jf), wfreq(jf), wfreq_u(jf)
-         ENDDO
-         WRITE(numout,*)
+         IF(lwp) THEN
+            WRITE(numout,*)
+            WRITE(numout,*) '      Frequency (Hz) bins for discretised wave spectrum (n / lower bound / frequency / upper bound):'
+            DO jf = 1, nn_nwfreq
+               WRITE(numout,*) '      ', jf, wfreq_l(jf), wfreq(jf), wfreq_u(jf)
+            ENDDO
+            WRITE(numout,*)
+         ENDIF
       ENDIF
 
       !                             !==  Allocate wave arrays  ==!
@@ -553,14 +601,20 @@ CONTAINS
          tusd    (:,:) = 0._wp
          tvsd    (:,:) = 0._wp
       ENDIF
-      IF( ln_sdw .OR. ln_ice_wav ) THEN
-         ALLOCATE( hsw(jpi,jpj), wmp(jpi,jpj) )
+      IF( l_ini_hsig ) THEN
+         ALLOCATE( hsw(jpi,jpj) )
          hsw(:,:) = 0._wp
+      ENDIF
+      IF( l_ini_wper ) THEN
+         ALLOCATE( wmp(jpi,jpj) )
          wmp(:,:) = 0._wp
       ENDIF
-      IF( ln_ice_wav ) THEN
-         ALLOCATE( wpf(jpi,jpj), wspec(jpi,jpj,nn_nwfreq) )
+      IF( l_ini_wpf ) THEN
+         ALLOCATE( wpf(jpi,jpj) )
          wpf  (:,:)   = 0._wp
+      ENDIF
+      IF( l_ini_wspec ) THEN   ! see above for difference between l_use_wspec and l_get_wspec
+         ALLOCATE( wspec(jpi,jpj,nn_nwfreq) )
          wspec(:,:,:) = 0._wp
       ENDIF
       IF( ln_zdfswm    .AND. .NOT. cpl_wnum ) ALLOCATE( wnum    (A2D(0) ) )
@@ -621,13 +675,16 @@ CONTAINS
             ut0sd(:,:) = 0.13_wp * tmask(:,:,1)   ! m/s
             vt0sd(:,:) = 0.00_wp                  ! m/s
          ENDIF
-         IF( ln_sdw .OR. ln_ice_wav ) THEN
+         IF( l_ini_hsig ) THEN
             hsw  (:,:) = 2.80_wp                  ! meters
+         ENDIF
+         IF( l_ini_wper ) THEN
             wmp  (:,:) = 8.00_wp                  ! seconds
          ENDIF
-         IF( ln_ice_wav ) THEN
+         IF( l_ini_wpf ) THEN
             wpf  (:,:) = 0.08_wp                  ! Hz
-            !
+         ENDIF
+         IF( l_ini_wspec ) THEN
             ! For wave spectrum test case calculate Bretschneider formula, which depends on wpf and hsw,
             ! using test case values defined above. See module icewav, function wav_spec_bret, for
             ! explanation of expression below (cannot use same function here due to circular dependence;
@@ -642,7 +699,7 @@ CONTAINS
          !
       ELSE                          !==  create the structure associated with fields to be read  ==!
          
-         IF( ln_ice_wav_spec ) THEN             ! wave energy spectrum (currently, needed for wave-ice interactions only)
+         IF( l_get_wspec ) THEN             ! wave energy spectrum (currently, needed for wave-ice interactions only)
             IF( .NOT. cpl_wspec ) THEN
                ALLOCATE( sf_wspec(1), STAT=ierror )         !* allocate and fill sf_wspec with sn_wpsec
                IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_wave_init: unable to allocate sf_wspec structure' )
@@ -652,7 +709,7 @@ CONTAINS
             ENDIF
          ENDIF
 
-         IF( ln_ice_wav ) THEN                  ! wave peak frequency (currently, needed for wave-ice interactions only)
+         IF( l_get_wpf ) THEN                  ! wave peak frequency (currently, needed for wave-ice interactions only)
             IF( .NOT. cpl_wpf ) THEN
                ALLOCATE( sf_wpf(1), STAT=ierror )           !* allocate and fill sf_wpf with sn_wpf
                IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_wave_init: unable to allocate sf_wpf structure' )
@@ -662,7 +719,7 @@ CONTAINS
             ENDIF
          ENDIF
 
-         IF( ln_sdw .OR. ln_ice_wav ) THEN
+         IF( l_get_hsig ) THEN
             IF( .NOT. cpl_hsig ) THEN           ! significant wave height
                ALLOCATE( sf_hsw(1), STAT=ierror )           !* allocate and fill sf_hsw with sn_hsw
                IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_wave_init: unable to allocate sf_hsw structure' )
@@ -670,7 +727,9 @@ CONTAINS
                IF( sn_hsw%ln_tint ) ALLOCATE( sf_hsw(1)%fdta(jpi,jpj,1,2) )
                CALL fld_fill( sf_hsw, (/ sn_hsw /), cn_dir, 'sbc_wave', 'Wave module', 'namsbc_wave' )
             ENDIF
-            !
+         ENDIF
+
+         IF( l_get_wper ) THEN
             IF( .NOT. cpl_wper ) THEN            ! wave mean period
                ALLOCATE( sf_wmp(1), STAT=ierror )           !* allocate and fill sf_wmp with sn_wmp
                IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_wave_init: unable to allocate sf_wmp structure' )

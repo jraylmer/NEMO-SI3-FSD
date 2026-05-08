@@ -1293,17 +1293,17 @@ CONTAINS
           IF( kt == nit000 ) ssh_ibb(1:jpi,1:jpj) = ssh_ib(1:jpi,1:jpj)  ! correct this later (read from restart if possible)
       ENDIF
       !
-      IF( ln_sdw .OR. ln_ice_wav ) THEN   ! Either Stokes drift correction or wave-ice interaction activated
       !                                                      ! ========================= !
-      !                                                      !      Wave mean period     !
+      IF( l_get_wper ) THEN   ! <<== sbcwave flag indicating !      Wave mean period     ! is needed
       !                                                      ! ========================= !
          IF( smyrcv(jpr_wper)%laction ) THEN
             wmp(A2D(0)) = smyrcv(jpr_wper)%z3(A2D(0),1)
             CALL lbc_lnk( 'sbccpl', wmp, 'T', 1.0_wp, ldfull = .TRUE. )
          ENDIF
+      ENDIF
       !
       !                                                      ! ========================= !
-      !                                                      !  Significant wave height  !
+      IF( l_get_hsig ) THEN   ! <<== sbcwave flag indicating !  Significant wave height  ! is needed
       !                                                      ! ========================= !
          IF( smyrcv(jpr_hsig)%laction ) THEN
             hsw(A2D(0)) = smyrcv(jpr_hsig)%z3(A2D(0),1)
@@ -1332,9 +1332,8 @@ CONTAINS
          ENDIF
       ENDIF
       !
-      IF( ln_ice_wav ) THEN   ! Wave-ice interaction activated
       !                                                      ! ========================= !
-      !                                                      !    Wave peak frequency    !
+      IF( l_get_wpf ) THEN    ! <<== sbcwave flag indicating !    Wave peak frequency    ! is needed
       !                                                      ! ========================= !
          IF( smyrcv(jpr_wpf)%laction ) THEN
             wpf(A2D(0)) = smyrcv(jpr_wpf)%z3(A2D(0),1)
@@ -1391,7 +1390,7 @@ CONTAINS
       !                                                      ! ========================= !
       !                                                      !   Wave energy spectrum    !
       !                                                      ! ========================= !
-      IF( smyrcv(jpr_wspec)%laction .AND. ln_wave_spec ) THEN
+      IF( smyrcv(jpr_wspec)%laction .AND. l_get_wspec ) THEN
          wspec(A2D(0),:) = smyrcv(jpr_wspec)%z3(A2D(0),:)
             CALL lbc_lnk( 'sbccpl', wspec, 'T', 1.0_wp, ldfull = .TRUE. )
       ENDIF

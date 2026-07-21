@@ -50,7 +50,7 @@ xmax, dx
 rmin
     Radius of the smallest floe size assumed to be affected by wave breakup.
     Note this restricts the scale of wavelengths that affects wave breakup,
-    but it does not mean that fracture sizes cannot be smaller than rmin.
+    but it does not mean that fracture sizes cannot be smaller than 2*rmin.
 
 nf, f0, kf
     Parameters specifying the discretisation of the wave spectrum, as is
@@ -127,9 +127,8 @@ phase_init = np.pi
 ec_0 = 3.e-5
 
 # Bin edges for histogram (hard-coded to match current default FSD bins with nn_nfsd = 12):
-hist_bins = np.array([0.0665, 5.31030847, 14.2865861, 29.0576686, 52.4122136,
-                      87.8691405, 139.518470, 211.635752, 308.037274,
-                      431.203059, 581.277225, 755.141047, 945.812834])
+hist_bins = np.array([  0.1  ,   2.15987,  10.3142,  28.3481,   59.6495,  107.088, 172.929, 258.78,
+                      365.584, 493.639  , 642.659 , 811.847 , 1000.])
 
 # Other constants:
 grav = 9.80665
@@ -218,7 +217,7 @@ def calc_break_locs(x1d_in, ssh_in, dx_in, rmin_in, hi_in, ec_in):
     criterion. The critical strain threshold is ec_in.
 
     This function also requires dx_in, the domain spacing, and rmin_in, the
-    minimum floe size (radius) affected by wave fracture. These parameters
+    minimum floe size (as radius) affected by wave fracture. These parameters
     define the size of the 'moving window' used to locate extrema in SSH,
     effectively filtering out waves that have too short a wavelength to have
     any effect on sea ice below the threshold size rmin_in.
@@ -303,22 +302,22 @@ def calc_break_locs(x1d_in, ssh_in, dx_in, rmin_in, hi_in, ec_in):
     return breaks_out
 
 
-def calc_frac_radii(x1d_in, breaks_in):
-    """Calculate an array of fracture lengths (as radii of resulting floes) from
-    a given 1D sub-grid domain, x1d_in, and the corresponding boolean array for
-    which locations break (breaks_in) as calculated in function calc_break_locs().
+def calc_frac_sizes(x1d_in, breaks_in):
+    """Calculate an array of fracture lengths from a given 1D sub-grid domain,
+    x1d_in, and the corresponding boolean array for which locations break
+    (breaks_in) as calculated in function calc_break_locs().
     """
-    return .5*(x1d_in[breaks_in][1:] - x1d_in[breaks_in][:-1])
+    return x1d_in[breaks_in][1:] - x1d_in[breaks_in][:-1]
 
 
-def calc_frac_histogram(frac_radii_in):
+def calc_frac_histogram(frac_sizes_in):
     """Calculate the normalised 'fracture histogram' from a given array of
-    fracture radii, frac_radii_in, calculated in function cal_frac_radii().
+    fracture sizes, frac_sizes_in, calculated in function calc_frac_sizes().
     The histogram bins are currently hardcoded (and set as a global array
     hist_bins).
     """
-    if len(frac_radii_in) > 0:
-        return np.histogram(frac_radii_in, density=True, bins=hist_bins)[0]
+    if len(frac_sizes_in) > 0:
+        return np.histogram(frac_sizes_in, density=True, bins=hist_bins)[0]
     else:
         return np.zeros(len(hist_bins)-1)
 
@@ -356,13 +355,15 @@ if __name__ == "__main__":
                                   hi_in  =slider_opts["hi"  ][0][1],
                                   ec_in  =slider_opts["ec"  ][0][1] * ec_0)
 
-    data_frac_radii = calc_frac_radii(data_x1d, data_breaks)
-    data_frac_hist  = calc_frac_histogram(data_frac_radii)
+    data_frac_sizes = calc_frac_sizes(data_x1d, data_breaks)
+    data_frac_hist  = calc_frac_histogram(data_frac_sizes)
 
 
     # ----------------------------------------------------------------------- #
     # Set up figure with initial plots
     # ======================================================================= #
+
+    plt.rcdefaults()
 
     fig = plt.figure(figsize=(9.6, 4.8))
     fig.canvas.manager.set_window_title("Wave Fracture")
@@ -405,7 +406,7 @@ if __name__ == "__main__":
 
     axd["C"].set_xlim(0., 500.)
     axd["C"].set_ylim(0., .03)
-    axd["C"].set_xlabel(r"Fracture radius (m)")
+    axd["C"].set_xlabel(r"Fracture size (m)")
     axd["C"].set_ylabel(r"Frequency density (m$^{-1}$)")
     axd["C"].set_title("(c) Fracture histogram", fontweight="bold")
 
@@ -429,7 +430,7 @@ if __name__ == "__main__":
 
         return xstr
 
-    hist_stat_text = axd["C"].annotate(stat_str(data_frac_radii), (.96, .95),
+    hist_stat_text = axd["C"].annotate(stat_str(data_frac_sizes), (.96, .95),
                                        ha="right", va="top", xycoords="axes fraction",
                                        fontsize="smaller")
 
@@ -658,19 +659,19 @@ if __name__ == "__main__":
         all remaining parameters.
         """
 
-        global data_x1d, data_x1d_km, data_ssh, data_breaks, data_frac_radii, data_frac_hist
+        global data_x1d, data_x1d_km, data_ssh, data_breaks, data_frac_sizes, data_frac_hist
 
         data_breaks = calc_break_locs(data_x1d, data_ssh, rmin_in=slider_rmin.val,
                                       dx_in=slider_dx.val, hi_in=slider_hi.val,
                                       ec_in=slider_ec.val * ec_0)
 
-        data_frac_radii = calc_frac_radii    (data_x1d, data_breaks)
-        data_frac_hist  = calc_frac_histogram(data_frac_radii)
+        data_frac_sizes = calc_frac_sizes    (data_x1d, data_breaks)
+        data_frac_hist  = calc_frac_histogram(data_frac_sizes)
 
         sctr_break.set_offsets(np.array([data_x1d_km[data_breaks], data_ssh[data_breaks]]).T)
 
         [bar.set_height(data_frac_hist[i]) for i, bar in enumerate(bar_frac)]
-        hist_stat_text.set_text(stat_str(data_frac_radii))
+        hist_stat_text.set_text(stat_str(data_frac_sizes))
 
         # This function is always the last step (all parameter changes result in
         # a change to the fracture distribution), so refresh the figure here:

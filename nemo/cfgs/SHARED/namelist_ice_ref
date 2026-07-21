@@ -328,24 +328,24 @@
 !------------------------------------------------------------------------------
    ln_fsd           = .false.         ! use FSD (T) or not (F)
                    ! -- category def. --!
-     nn_fsd_catini    = 2               ! option for FSD category limits (as radii):
+     nn_fsd_catini    = 2               ! option for FSD category limits ('floe size' = mean caliper diameter):
                                         !   0   = user defined (read first nn_nfsd+1 values from rn_fsd_catbnd below)
-                                        !   1-3 = calculate nn_nfsd categories between nn_fsd_rmin and nn_fsd_rmax (below) such that:
+                                        !   1-3 = calculate nn_nfsd categories between nn_fsd_smin and nn_fsd_smax (below) such that:
                                         !     1 =   spacing is uniform (equal-width categories)
                                         !     2 =   spacing follows Gaussian profile (recommended for floe size range ~  1km)
                                         !     3 =   spacing increases exponentially  (recommended for floe size range ~ 10km)
                                         !   Note: categories are printed in ocean.output for checking
                                         !
        nn_nfsd          = 12            !   number of floe size distribution categories
-       rn_fsd_rmin      = 0.1           !   smallest floe size (radius; m)
-       rn_fsd_rmax      = 1000.         !   largest  floe size (radius; m)
-       rn_fsd_rspc      = 1.            !   non-linearity adjustment, nn_fsd_catini = 2 or 3 (> 0, ~1)
+       rn_fsd_smin      = 0.1           !   smallest floe size (diameter; m)
+       rn_fsd_smax      = 1000.         !   largest  floe size (diameter; m)
+       rn_fsd_spc       = 1.            !   non-linearity adjustment, nn_fsd_catini = 2 or 3 (> 0, ~1)
                                         !     =1           => strong Gaussian/exponential
-                                        !     approaches 0 => becomes closer to uniform case (for same rmin--rmax range)
+                                        !     approaches 0 => becomes closer to uniform case (for same smin--smax range)
                                         !
        rn_fsd_catbnd    = .1, 5., 10., 15., 20., 30., 40., 60., 100., 200., 400., 650., 1000.
                                         !
-       rn_floeshape     = 0.66          ! floe shape parameter to determine floe area from radius (dimensionless)
+       rn_floeshape     = 0.66          ! floe shape parameter to determine floe area from diameter (dimensionless)
                                         !
      nn_fsd_ini       = 2               ! initialisation method (ln_iceini = T OR ln_rstart = T from previous run with no FSD)
                                         !   1 = all ice in largest floe size category
@@ -355,7 +355,7 @@
      rn_fsd_ini_alpha = 2.1             ! Value of alpha parameter (number FSD exponent)
                                         ! (default from Perovich and Jones, 2014; JGR:O)
                    ! -- ice growth   -- !
-     rn_fsd_r_newice  = 1.e5            ! Floe size (radius) of new ice growth (in absence of waves; m)
+     rn_fsd_s_newice  = 1.e5            ! Floe size of new ice growth (in absence of waves; m)
                                         ! (set to arbitrarily large number => largest floe size category)
                    ! -- floe welding -- !
      rn_fsd_amin_weld = 0.1             ! Minimum sea ice concentration for floe welding in freezing conditions
@@ -402,7 +402,7 @@
                  ! -- nn_frac_scheme=4 --!
          nn_ht15_nx1d = 10000            ! number of points in 1D subdomain for SSH
          rn_ht15_dx1d = 1.               ! increment of 1D subdomain for SSH calculation (m)
-         nn_ht15_rmin = 10               ! radius of smallest floes affected by wave fracture in units of rn_ice_wav_dx1d
+         nn_ht15_rmin = 10               ! smallest floes affected by wave fracture expressed as RADIUS in units of rn_ice_wav_dx1d
          ln_ht15_rand = .false.          ! use random phases when calculating sea surface height (SSH)
                                          ! *WARNING* HUGE computational impact if T
                                          ! *WARNING* not bitwise reproducible  if T

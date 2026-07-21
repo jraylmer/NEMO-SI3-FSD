@@ -8,21 +8,23 @@ Four options are available: user-defined in the namelist (not shown here),
 uniform spacing, Gaussian spacing, and exponential spacing. The latter three
 are all determined by specifying a minimum and maximum floe size to be resolved,
 and a number of floe size categories. For the Gaussian and exponential spacing,
-an additional parameter, called 's' here, is available to adjust the shape to make
-it more linear (i.e., less refined spacing at smaller categories).
+an additional parameter, called 'sigma' here, is available to adjust the shape to
+make it more linear (i.e., less refined spacing at smaller categories).
 
-Note that increasing s beyond 1 for the exponential case quickly leads to extremely
+Note that increasing sigma beyond 1 for the exponential case quickly leads to extremely
 small categories that might not even be able to be resolved. In SI3 (icefsd.F90,
 subroutine fsd_initbounds), a warning is raised whenever the spacing becomes smaller
 than 1cm (in any initialisation case) with suggestions to (and how to) adjust.
 
-Increasing s > 1 in the Gaussian case does not make much difference to the shape
-[there is a limit -- see docstring of function bounds_gaussian()].
+Increasing sigma > 1 in the Gaussian case does not make much difference to the
+shape [there is a limit -- see docstring of function bounds_gaussian()].
 
 These methods allow online production of a variety of floe size discretisations,
 and can approximate well enough the hard-coded limits used in Icepack (optionally
 plotted here) and both 'partitions' used in the model of Zhang et al. (2015, JGR:O).
-Close approximations to these are given by:
+Close approximations to these are given by setting the minimum (-m) and maximum (-M)
+floe size (by default, these are selected automatically by not giving those flags)
+and then:
 
     Icepack bounds, n = 12                  --> Gaussian    with s ~ 10
     Icepack bounds, n = 24                  --> Exponential with s ~ 0.75
@@ -52,97 +54,97 @@ from tabulate import tabulate
 colors = {"hc": "tab:grey", "un": "tab:blue", "gs": "tab:green", "ex": "tab:orange"}
 
 
-def bounds_uniform(n, rmin, rmax):
+def bounds_uniform(n, smin, smax):
     """Returns n+1 limits for n floe size categories that are uniformly spaced
-    covering the range rmin to rmax inclusive.
+    covering the range smin to smax inclusive.
     """
-    return np.linspace(rmin, rmax, n+1)
+    return np.linspace(smin, smax, n+1)
 
 
-def bounds_gaussian(n, rmin, rmax, s=1.):
+def bounds_gaussian(n, smin, smax, sigma=1.):
     """Returns n+1 limits for n floe size categories with a Gaussian spacing and
-    spanning the range rmin to rmax inclusive. Specifically, the limits L(i) are
+    spanning the range smin to smax inclusive. Specifically, the limits L(i) are
     formulated similarly to how the ice thickness category limits are defined by
     Hibler (1980; Mon. Weather Rev.; Appendix C), as cited by Zhang et al. (2015):
 
-                ( rmin                                        i = 0
+                ( smin                                            i = 0
         L(i) = <
-                ( L(i-1) + k * [ 1 - exp( -(i/(s*n))^2 ) ]    i = 1..n
+                ( L(i-1) + k * [ 1 - exp( -(i/(sigma*n))^2 ) ]    i = 1..n
 
-    where k is a constant that is calculated to ensure L(n) = rmax and s is a shape
-    parameter that can be thought of as the standard deviation and controls the
-    degree of non-linearity in the limits. The exponent includes a factor of n
-    multiplying s, so that changing the number of categories without changing the
-    overall range (rmin and/or rmax) keeps the same overall shape (note that the
+    where k is a constant that is calculated to ensure L(n) = smax and sigma is a
+    shape parameter that can be thought of as the standard deviation and controls
+    the degree of non-linearity in the limits. The exponent includes a factor of n
+    multiplying sigma, so that changing the number of categories without changing
+    the overall range (smin and/or smax) keeps the same overall shape (note that the
     expression does not depend on n for i = 0 and i = n).
 
-    Here, s can be varied down to a limit of 0 (but not exactly), which makes the
+    Here, sigma can be varied down to a limit of 0 (but not exactly), which makes the
     spacing uniform. The default of 1 makes it close to as 'fully curved' as it
     can be; increasing it further does not make much difference as there is a
-    limit to how 'curved' the Gaussian can be with a constraint on L(n) = rmax
-    (mathematically, increasing s decreases k and the two changes compensate in
-    the limit of large s).
+    limit to how 'curved' the Gaussian can be with a constraint on L(n) = smax
+    (mathematically, increasing sigma decreases k and the two changes compensate in
+    the limit of large sigma).
     """
 
-    s = max(1.e-10, s)    # avoid division by zero
+    sigma = max(1.e-10, sigma)    # avoid division by zero
 
-    # Determine k by using L(n) = rmax = rmin + k * sum(1 - exp(...))
+    # Determine k by using L(n) = smax = smin + k * sum(1 - exp(...))
     # from the recursive formula for L(i) and then rearranging for k:
     k = 0.
     for i in range(0, n):
-        k += 1. - np.exp(-((n-i)/(s*n))**2)
-    k = (rmax - rmin) / k
+        k += 1. - np.exp(-((n-i)/(sigma*n))**2)
+    k = (smax - smin) / k
 
     lims = np.zeros(n+1)
-    lims[0] = rmin
+    lims[0] = smin
     for i in range(1, n+1):
-        lims[i] = lims[i-1] + k * (1. - np.exp(-(i/(s*n))**2))
+        lims[i] = lims[i-1] + k * (1. - np.exp(-(i/(sigma*n))**2))
 
     return lims
 
 
-def bounds_exponential(n, rmin, rmax, s):
+def bounds_exponential(n, smin, smax, sigma):
     """Returns n+1 limits for n floe size categories with exponentially-increasing
-    spacing and spanning the range rmin to rmax inclusive. The limits L(i) are
+    spacing and spanning the range smin to smax inclusive. The limits L(i) are
     defined to have a similar form to the Gaussian profile:
 
-                ( rmin                            i = 0
+                ( smin                            i = 0
         L(i) = <
-                ( L(i-1) + k * exp( 10*s*i/n )    i = 1..n
+                ( L(i-1) + k * exp( 10*sigma*i/n )    i = 1..n
 
-    where k is a constant that is calculated to ensure L(n) = rmax and s is a shape
+    where k is a constant that is calculated to ensure L(n) = rmax and sigma is a shape
     parameter that controls the degree of non-linearity in the limits. The exponent
-    includes a factor of n dividing s, so that changing the number of categories without
-    changing the overall range (rmin and/or rmax) keeps the same overall shape (noting
+    includes a factor of n dividing sigma, so that changing the number of categories without
+    changing the overall range (smin and/or smax) keeps the same overall shape (noting
     that the expression does not depend on n for i = 0 and i = n). There is also an
     ad-hoc factor of 10 to ensure that with default parameters, the floe spacing at small
     categories is not too small, i.e., setting the default scale to not be 'too exponential'.
 
-    Here, s can be varied down to a limit of 0, which makes the spacing uniform. It can
+    Here, sigma can be varied down to a limit of 0, which makes the spacing uniform. It can
     be increased to anything, but this can easily result in spacings that are too small
     to be resolved. There is not really anything that can be done to avoid it so a warning
     is added in SI3 if the spacing ever becomes smaller than 1 cm.
     """
 
-    # Determine k by using L(n) = rmax = rmin + k * exp(...)
+    # Determine k by using L(n) = smax = smin + k * exp(...)
     # from the recursive formula for L(i) and then rearranging for k:
     k = 0.
     for i in range(1, n+1):
-        k += np.exp(10.*s*i/n)
-    k = (rmax - rmin) / k
+        k += np.exp(10.*sigma*i/n)
+    k = (smax - smin) / k
 
     lims = np.zeros(n+1)
-    lims[0] = rmin
+    lims[0] = smin
     for i in range(1, n+1):
-        lims[i] = lims[i-1] + k * np.exp( 10.*s*i/n )
+        lims[i] = lims[i-1] + k * np.exp( 10.*sigma*i/n )
 
     return lims
 
 
-def calc_iweld(rl, rc, ru):
+def calc_iweld(sl, sc, su):
     """Calculate floe welding array corresponding to 'floe_iweld' in SI3 and representing
     the category that each pair of category-category interactions results in due to
-    welding. Here, floe area is taken as the floe radius squared and the 'shape'
+    welding. Here, floe area is taken as the floe size squared and the 'shape'
     parameter is ignored (or implicitly set to 1, but it doesn't make a difference anyway).
 
     The welding array is determined as it is currently done in SI3/Icepack by considering
@@ -150,16 +152,16 @@ def calc_iweld(rl, rc, ru):
     category j3 = iweld(j1,j2) whose limits contain that net floe size.
     """
 
-    nfsd = len(rl)
+    nfsd = len(sl)
     iweld = np.zeros((nfsd,nfsd), dtype=int)
 
     for j1 in range(nfsd):
         for j2 in range(nfsd):
-            aweld = rc[j1]**2 + rc[j2]**2  # ~ area of welded floe
+            aweld = sc[j1]**2 + sc[j2]**2  # ~ area of welded floe
             for j3 in range(nfsd-1):  # find welded category
-                if aweld >= rl[j3]**2 and aweld < ru[j3]**2:
+                if aweld >= sl[j3]**2 and aweld < su[j3]**2:
                     iweld[j1,j2] = j3
-            if aweld >= rl[nfsd-1]**2:  # check for largest category (no upper limit)
+            if aweld >= sl[nfsd-1]**2:  # check for largest category (no upper limit)
                 iweld[j1,j2] = nfsd-1
 
     iweld += 1  # so indices are Fortran style / correspond to category number
@@ -170,19 +172,17 @@ def calc_iweld(rl, rc, ru):
 def main():
 
     prsr = ArgumentParser(usage="Plot FSD category limits")
-    prsr.add_argument("-n"          , type=int  , default=12  , help="Number of categories")
-    prsr.add_argument("-s"          , type=float, default=1.  , help="Non-linearity parameter")
-    prsr.add_argument("-m", "--rmin", type=float, default=None, help="Minimum floe size")
-    prsr.add_argument("-M", "--rmax", type=float, default=None, help="Maximum floe size")
-    prsr.add_argument("--hard-coded", type=str  , default="ip", help="Hard-coded limits to plot",
-                                      choices=["ip", "z15", "none"])
-    prsr.add_argument("-w", "--weld", type=str  , default="hc", help="Which limits for welding array",
-                                      choices=["hc", "un", "gs", "ex", "none"])
+    prsr.add_argument("-n"           , type=int  , default=12  , help="Number of categories")
+    prsr.add_argument("-s", "--sigma", type=float, default=1.  , help="Non-linearity parameter")
+    prsr.add_argument("-m", "--smin" , type=float, default=None, help="Minimum floe size")
+    prsr.add_argument("-M", "--smax" , type=float, default=None, help="Maximum floe size")
+    prsr.add_argument("--hard-coded" , type=str  , default="ip", help="Hard-coded limits to plot",
+                                       choices=["ip", "z15", "none"])
+    prsr.add_argument("-w", "--weld" , type=str  , default="hc", help="Which limits for welding array",
+                                       choices=["hc", "un", "gs", "ex", "none"])
 
     prsr.add_argument("-p", "--print-lims", action="store_true",
                       help="Print limit values in a table")
-    prsr.add_argument("-z", "--z15-lims", action="store_true",
-                      help="Compare with Zhang et al. (2015) limits, not Icepack")
 
     cmd = prsr.parse_args()
 
@@ -191,8 +191,8 @@ def main():
     # Set hard-coded limits for comparison
     if cmd.hard_coded == "none":
         n = cmd.n
-        rmin = 0.1   if cmd.rmin is None else cmd.rmin
-        rmax = 1000. if cmd.rmax is None else cmd.rmax
+        smin = 0.1   if cmd.smin is None else cmd.smin
+        smax = 1000. if cmd.smax is None else cmd.smax
         lims["hc"] = np.nan * np.zeros(n+1)
     else:
         if cmd.hard_coded == "z15":
@@ -200,46 +200,48 @@ def main():
             lims["hc"] = np.array([-0.1, 0.1, 10.2, 40.2, 99.8, 199.1, 347.9, 556.,
                                    833.1, 1189.2, 1633.9, 2176.8, 2827.7])
         else:
-            # Hard-coded limits in Icepack:
+            # Hard-coded limits in Icepack (note they are given as 'radii'):
             lims["hc"] = np.array([.0665000, 5.3103085, 14.2865861, 29.0576686, 52.4122136,
                                    87.8691405, 139.5184700, 211.6357520, 308.0372740,
                                    431.2030590, 581.2772250, 755.1410470, 945.8128340,
                                    1343.5444600, 1822.6536400, 2472.6136100, 3354.3498800,
                                    4550.5141300, 6173.2316400, 8374.6117000, 11361.0059000,
                                    15412.3510000, 20908.4095000, 28364.3675000, 38479.1270000])
+            # Those are the hard-coded 'radii'; convert to diameters:
+            lims["hc"] *= 2.
 
         n    = min(cmd.n, len(lims["hc"])-1)
         lims["hc"] = lims["hc"][:n+1]
-        rmin = lims["hc"][0]  if cmd.rmin is None else cmd.rmin
-        rmax = lims["hc"][-1] if cmd.rmax is None else cmd.rmax
+        smin = lims["hc"][0]  if cmd.smin is None else cmd.smin
+        smax = lims["hc"][-1] if cmd.smax is None else cmd.smax
 
     # X-axes for plotting:
     cat    = np.arange(1., n+1, 1.)
     catlim = np.arange(.5, n+1, 1.)
 
-    # Save lower limit (rl), centre of category (rc), and upper limit (ru):
-    rl = {}  ;  rc = {}  ;  ru = {}
+    # Save lower limit (sl), centre of category (sc), and upper limit (su):
+    sl = {}  ;  sc = {}  ;  su = {}
 
-    # ---- Hard-coded bounds and radii arrays:
-    rl["hc"] = lims["hc"][:n]
-    ru["hc"] = lims["hc"][1:n+1]
-    rc["hc"] = .5 * (rl["hc"] + ru["hc"])
+    # ---- Hard-coded bounds and size arrays:
+    sl["hc"] = lims["hc"][:n]
+    su["hc"] = lims["hc"][1:n+1]
+    sc["hc"] = .5 * (sl["hc"] + su["hc"])
 
-    # ---- Bounds and radii arrays calculated from formula:
-    lims["un"] = bounds_uniform(n, rmin, rmax)
-    rl["un"]   = lims["un"][:n]
-    ru["un"]   = lims["un"][1:n+1]
-    rc["un"]   = .5 * (rl["un"] + ru["un"])
+    # ---- Bounds and size arrays calculated from formula:
+    lims["un"] = bounds_uniform(n, smin, smax)
+    sl["un"]   = lims["un"][:n]
+    su["un"]   = lims["un"][1:n+1]
+    sc["un"]   = .5 * (sl["un"] + su["un"])
 
-    lims["gs"] = bounds_gaussian(n, rmin, rmax, cmd.s)
-    rl["gs"]   = lims["gs"][:n]
-    ru["gs"]   = lims["gs"][1:n+1]
-    rc["gs"]   = .5 * (rl["gs"] + ru["gs"])
+    lims["gs"] = bounds_gaussian(n, smin, smax, cmd.sigma)
+    sl["gs"]   = lims["gs"][:n]
+    su["gs"]   = lims["gs"][1:n+1]
+    sc["gs"]   = .5 * (sl["gs"] + su["gs"])
 
-    lims["ex"] = bounds_exponential(n, rmin, rmax, cmd.s)
-    rl["ex"]   = lims["ex"][:n]
-    ru["ex"]   = lims["ex"][1:n+1]
-    rc["ex"]   = .5 * (rl["ex"] + ru["ex"])
+    lims["ex"] = bounds_exponential(n, smin, smax, cmd.sigma)
+    sl["ex"]   = lims["ex"][:n]
+    su["ex"]   = lims["ex"][1:n+1]
+    sc["ex"]   = .5 * (sl["ex"] + su["ex"])
 
     if cmd.print_lims:
         if cmd.hard_coded == "none":
@@ -255,15 +257,17 @@ def main():
                 rows.append([j] + [lims[x][j] for x in ["hc", "gs", "ex", "un"]])
 
         print("\n" + ("-"*44))
-        print(  f"Category limits computed for n = {n}\nr_min = {100.*rmin:.1f} cm, "
-              + f"r_max = {rmax/1000.:.3f} km, s = {cmd.s:.2f}")
+        print(  f"Category limits computed for n = {n}\ns_min = {100.*smin:.1f} cm, "
+              + f"r_max = {smax/1000.:.3f} km, sigma = {cmd.sigma:.2f}")
         print(("="*44) + "\n")
         print(tabulate(rows, headers=headers) + "\n" + ("-")*44)
 
     # ----------------------------------------------------------------------- #
     # Plot the limits computed from the various functions (and hard-coded)
     # ======================================================================= #
-    mpl.rcParams["font.size"] = 14.
+    
+    plt.rcdefaults()
+    plt.rcParams["font.size"] = 14.
 
     # ax.scatter() keyword arguments for plotting centres rc and limits rl/ru:
     centre_kw = {"marker": "o", "s": 10. , "clip_on": False, "edgecolor": "none"}
@@ -276,9 +280,9 @@ def main():
                         ["Uniform" , "Gaussian" , "Exponential"]):
 
         ax1.plot(   catlim, lims[k]/1000., color=colors[k], label=label)
-        ax1.scatter(cat-.5, rl[k]  /1000., color=colors[k], **limits_kw)
-        ax1.scatter(cat   , rc[k]  /1000., color=colors[k], **centre_kw)
-        ax1.scatter(cat+.5, ru[k]  /1000., color=colors[k], **limits_kw)
+        ax1.scatter(cat-.5, sl[k]  /1000., color=colors[k], **limits_kw)
+        ax1.scatter(cat   , sc[k]  /1000., color=colors[k], **centre_kw)
+        ax1.scatter(cat+.5, su[k]  /1000., color=colors[k], **limits_kw)
 
     if cmd.hard_coded != "none":
 
@@ -286,9 +290,9 @@ def main():
                  label="Zhang et al. (2015)" if cmd.hard_coded == "z15"
                        else "Icepack (hardcoded)")
 
-        ax1.scatter(cat-.5, rl["hc"]/1000., color=colors["hc"], **limits_kw)
-        ax1.scatter(cat   , rc["hc"]/1000., color=colors["hc"], **centre_kw)
-        ax1.scatter(cat+.5, ru["hc"]/1000., color=colors["hc"], **limits_kw)
+        ax1.scatter(cat-.5, sl["hc"]/1000., color=colors["hc"], **limits_kw)
+        ax1.scatter(cat   , sc["hc"]/1000., color=colors["hc"], **centre_kw)
+        ax1.scatter(cat+.5, su["hc"]/1000., color=colors["hc"], **limits_kw)
 
     # For legend:
     ax1.scatter(np.nan, np.nan, color="k", label="Category limits" , **limits_kw)
@@ -297,7 +301,7 @@ def main():
     # Format plot:
     ax1.set_title("Floe size category definitions")
     ax1.set_xlabel("Category")
-    ax1.set_ylabel("Radius (km)")
+    ax1.set_ylabel("Floe size (km)")
     ax1.set_xlim(.5, n+.5)
     ax1.set_ylim(ymin=0)
     ax1.legend(fontsize="x-small")
@@ -319,8 +323,8 @@ def main():
     fig1.tight_layout()
     fig1.subplots_adjust(bottom=.2, top=.925)
 
-    fig1.text(.025, .025,  (r"$n=%i$  |  $r_\mathrm{min}=%.1f$ cm  |  " % (n, 100.*rmin))
-                         + (r"$r_\mathrm{max}=%.3f$ km  |  $s=%.2f$"    % (rmax/1000., cmd.s)),
+    fig1.text(.025, .025,  (r"$n=%i$  |  $s_\mathrm{min}=%.1f$ cm  |  "   % (n, 100.*smin))
+                         + (r"$s_\mathrm{max}=%.3f$ km  |  $\sigma=%.2f$" % (smax/1000., cmd.sigma)),
               ha="left", va="bottom", fontsize="x-small")
 
 
@@ -334,7 +338,7 @@ def main():
         # Calculate floe welding array for specified set of limits. Create two
         # copies, one for the pcolormesh where the invalid values are masked out
         # and one retaining the actual array values for the text labels:
-        iweld_pcm = calc_iweld(rl[cmd.weld], rc[cmd.weld], ru[cmd.weld])
+        iweld_pcm = calc_iweld(sl[cmd.weld], sc[cmd.weld], su[cmd.weld])
         iweld_txt = iweld_pcm.copy()
 
         # Mask out invalid values in iweld_pcm:

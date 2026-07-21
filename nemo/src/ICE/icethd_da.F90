@@ -19,7 +19,7 @@ MODULE icethd_da
    USE phycst  , ONLY : rpi, rt0, rhoi, rhos
    USE sbc_oce, ONLY: sst_m
    USE ice
-   USE icefsd  , ONLY : fsd_peri_dens, ice_fsd_thd_evolve, a_ifsd, floe_dr
+   USE icefsd  , ONLY : fsd_peri_dens, ice_fsd_thd_evolve, a_ifsd, floe_ds
    !
    USE in_out_manager , ONLY : numnam_ice_ref, numnam_ice_cfg, numout, numoni, lwp, lwm  ! I/O manager
    USE lib_mpp        , ONLY : ctl_stop, ctl_warn, ctl_nam                               ! MPP library
@@ -153,10 +153,11 @@ CONTAINS
                !     It comes from the divergence term in the tendency of FSD due to
                !     thermodynamics (see ice_fsd_thd_evolve/docs).
                !
-               !     Check with MIN() here should not be needed, but it does not hurt:
-               !
-               zda = MIN( zwlat * rDt_ice * a_i(ji,jj,jl_cat) * (fsd_peri_dens( a_ifsd(ji,jj,:,jl_cat) ) + a_ifsd(ji,jj,1,jl_cat) / floe_dr(1)),  &
-                  &       a_i(ji,jj,jl_cat) )
+               zda = zwlat * rDt_ice * a_i(ji,jj,jl_cat) * ( fsd_peri_dens( a_ifsd(ji,jj,:,jl_cat) )   &
+                  &                                          + rpi * a_ifsd(ji,jj,1,jl_cat) / (2._wp * rn_floeshape * floe_ds(1)) )
+
+               ! Check with MIN() here should not be needed, but it does not hurt:
+               zda = MIN( zda, a_i(ji,jj,jl_cat) )
                !
             ELSE
                ! --- Calculate reduction of total sea ice concentration --- !

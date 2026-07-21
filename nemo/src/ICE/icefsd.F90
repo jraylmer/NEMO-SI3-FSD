@@ -52,14 +52,14 @@ MODULE icefsd
    PUBLIC ::   fsd_peri_dens              ! function called by ice_thd_da
    PUBLIC ::   ice_fsd_cor                ! generic interface: small/negative value corrections and re-normalisation
 
-   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:)   :: floe_rl      !: FSD floe radii, lower bounds of categories (m)
-   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:)   :: floe_rc      !: FSD floe radii, centre       of categories (m)
-   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:)   :: floe_ru      !: FSD floe radii, upper bounds of categories (m)
-   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:)   :: floe_dr      !: FSD category widths (m)
-   REAL(wp),         ALLOCATABLE, DIMENSION(:)   :: floe_al      !: FSD floe areas, floes of radii floe_rl (m2)
-   REAL(wp),         ALLOCATABLE, DIMENSION(:)   :: floe_ac      !: FSD floe areas, floes of radii floe_rc (m2)
-   REAL(wp),         ALLOCATABLE, DIMENSION(:)   :: floe_au      !: FSD floe areas, floes of radii floe_ru (m2)
-   REAL(wp),         ALLOCATABLE, DIMENSION(:)   :: floe_dlog_rc !: FSD cat. centre spacing in log(radius) space
+   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:)   :: floe_sl      !: FSD floe size, lower bounds of categories (m)
+   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:)   :: floe_sc      !: FSD floe size, centre       of categories (m)
+   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:)   :: floe_su      !: FSD floe size, upper bounds of categories (m)
+   REAL(wp), PUBLIC, ALLOCATABLE, DIMENSION(:)   :: floe_ds      !: FSD category widths (m)
+   REAL(wp),         ALLOCATABLE, DIMENSION(:)   :: floe_al      !: FSD floe areas, floes of size floe_sl (m2)
+   REAL(wp),         ALLOCATABLE, DIMENSION(:)   :: floe_ac      !: FSD floe areas, floes of size floe_sc (m2)
+   REAL(wp),         ALLOCATABLE, DIMENSION(:)   :: floe_au      !: FSD floe areas, floes of size floe_su (m2)
+   REAL(wp),         ALLOCATABLE, DIMENSION(:)   :: floe_dlog_sc !: FSD cat. centre spacing in log(size) space
    INTEGER ,         ALLOCATABLE, DIMENSION(:,:) :: floe_iweld   !: index of FSD cat. two given FSD cats. can weld to
    INTEGER , PUBLIC                              :: nf_newice    !: index of FSD cat. for new ice in absence of waves (m)
 
@@ -71,12 +71,12 @@ MODULE icefsd
    ! ** namelist (namfsd) **
    REAL(wp), DIMENSION(100) ::      rn_fsd_catbnd   ! User-defined category limits if nn_nfsd_catini = 0 (below)
    INTEGER  ::   nn_fsd_catini      ! FSD category definition option
-   REAL(wp) ::   rn_fsd_rmin        ! Minimum floe size (radius in m; nn_fsd_catini >= 1)
-   REAL(wp) ::   rn_fsd_rmax        ! Minimum floe size (radius in m; nn_fsd_catini >= 1)
-   REAL(wp) ::   rn_fsd_rspc        ! Category spacing non-linearity parameter (nn_fsd_catini = 2,3)
+   REAL(wp) ::   rn_fsd_smin        ! Minimum floe size (m; nn_fsd_catini >= 1)
+   REAL(wp) ::   rn_fsd_smax        ! Minimum floe size (m; nn_fsd_catini >= 1)
+   REAL(wp) ::   rn_fsd_spc         ! Category spacing non-linearity parameter (nn_fsd_catini = 2,3)
    INTEGER  ::   nn_fsd_ini         ! FSD init. options (1 = all in largest FSD cat; 2 = imposed power law)
    REAL(wp) ::   rn_fsd_ini_alpha   ! Parameter used for power law initial FSD with nn_fsd_ini = 2 only
-   REAL(wp) ::   rn_fsd_r_newice    ! Floe size of new ice in absence of wave field [m]
+   REAL(wp) ::   rn_fsd_s_newice    ! Floe size of new ice in absence of wave field [m]
    REAL(wp) ::   rn_fsd_t_restore   ! FSD restoring timescale [s]
    REAL(wp) ::   rn_fsd_amin_weld   ! Minimum concentration required for floe welding to take effect
    REAL(wp) ::   rn_fsd_c_weld      ! Floe welding coefficient [m-2.s-1]
@@ -165,11 +165,11 @@ CONTAINS
       !!
       !! ** Purpose :   In-plane (brittle) fracture of sea ice.
       !!
-      !! ** Method  :   Wherever the FSD f(r) satisfies:
+      !! ** Method  :   Wherever the FSD f(s) satisfies:
       !!
-      !!                (log(f(r+1)) - log(f(r))) / (log(r+1) - log(r)) > 0,
+      !!                (log(f(s+1)) - log(f(s))) / (log(s+1) - log(s)) > 0,
       !!
-      !!                shift area fraction of floes in r+1 category into r
+      !!                shift area fraction of floes in s+1 category into s
       !!                category at a rate with a restoring time scale
       !!                rn_fsd_t_restore (set in namelist).
       !!
@@ -205,7 +205,7 @@ CONTAINS
                   ! --- Calculate forward-in-space gradient in log-space
                   !
                   zlogfsd_grad = ( LOG(a_ifsd(ji,jj,jf+1,jl)) - LOG(a_ifsd(ji,jj,jf,jl)) )   &
-                     &           / floe_dlog_rc(jf)
+                     &           / floe_dlog_sc(jf)
                   !
                   ! --- If gradient is too large, break up some larger floes into
                   !     smaller floes [transfer area from larger to smaller category;
@@ -243,14 +243,15 @@ CONTAINS
       !! ** Method  :   Calculate lead area and lateral surface area of floes
       !!                following Horvat and Tziperman (2015):
       !!
-      !!                A_lead = int [ f(r,h) * (2*r_lw/r + (r_lw/r)**2) ] dr dh
-      !!                A_lat  = int [ f(r,h) * (2*h/r) ] dr dh
+      !!                A_lead = int [ f(s,h) * (4*r_lw/s + 4*(r_lw/s)**2) ] ds dh
+      !!                A_lat  = int [ f(s,h) * pi * h / (a_shape * s) ] ds dh
       !!
       !!                where A_lead = lead area (per unit ocean area)
       !!                      A_lat  = total area of vertical edges of floes
       !!                               (per unit ocean area)
-      !!                      int    = integral over floe size r and thickness h
-      !!                      f(r,h) = g(h)L(r,h) floe size-thickness distribution
+      !!                      int    = integral over floe size s and thickness h
+      !!                      f(s,h) = g(h)L(s,h) floe size-thickness distribution
+      !!                      a_shape= floe shape parameter
       !!
       !!                The lead width r_lw is the annulus surrounding floes for
       !!                which freezing of existing floes occurs, distinguished
@@ -327,7 +328,7 @@ CONTAINS
       za_lead       = 0._wp
       za_lat_surf   = 0._wp
       zat_i         = SUM(pa_i)
-      zr_lw         = floe_rc(1)   ! smallest floe size for width of lead region
+      zr_lw         = floe_sc(1)   ! smallest floe size for width of lead region
 
       ! --- Calculate za_lead and za_lat_surf (integrate/sum over thickness
       !     and floe size cats.):
@@ -342,12 +343,11 @@ CONTAINS
 
          DO jf = 1, nn_nfsd
             !
-            za_lead = za_lead + pa_i(jl) * pa_ifstd(jf,jl)       &
-               &                * (2._wp * zr_lw / floe_rc(jf)   &
-               &                   + zr_lw**2 / floe_rc(jf)**2)
+            za_lead = za_lead + pa_i(jl) * pa_ifstd(jf,jl)   &
+               &                         * 4._wp * (zr_lw / floe_sc(jf) + zr_lw**2 / floe_sc(jf)**2)
             !
             za_lat_surf = za_lat_surf + pa_ifstd(jf,jl) * pa_i(jl)   &
-               &                        * 2._wp * zh_i / floe_rc(jf)
+               &                        * rpi * zh_i / (rn_floeshape * floe_sc(jf))
             !
          ENDDO
       ENDDO
@@ -366,8 +366,8 @@ CONTAINS
 
                ! note lateral growth rate = zv_latgro / rDt_ice, but here we
                ! calculate the growth over time step which is just zv_latgro:
-               pda_latgro(jl) = pda_latgro(jl) + 2._wp * pa_i(jl) * pa_ifstd(jf,jl)   &
-                  &                                    * pv_latgro / floe_rc(jf)
+               pda_latgro(jl) = pda_latgro(jl) + 4._wp * pa_i(jl) * pa_ifstd(jf,jl)   &
+                  &                                    * pv_latgro / floe_sc(jf)
 
             ENDDO
          ENDDO
@@ -425,16 +425,16 @@ CONTAINS
             !
             ! --- Add new ice to specified floe size category
             !
-            ! The area fraction of ice in this floe size category, rk,
+            ! The area fraction of ice in this floe size category, sk,
             ! and thickness category to which new ice is added, h, is:
             !
-            !    [ L(rk,h)g(h)drdh ]_before = pa_ifsd(kf) * pa_i_before
+            !    [ L(sk,h)g(h)dsdh ]_before = pa_ifsd(sk) * pa_i_before
             !
             ! before addition of pa_newice. Then, after addition of new ice:
             !
-            !    [ L(rk,h)g(h)drdh ]_after = [ L(rk,h)g(h)drdh ]_before + pa_newice
+            !    [ L(sk,h)g(h)dsdh ]_after = [ L(sk,h)g(h)dsdh ]_before + pa_newice
             !
-            ! g(h) is already updated in ice_thd_do, but L(rk,h) needs updating
+            ! g(h) is already updated in ice_thd_do, but L(sk,h) needs updating
             ! too, achieved by rearranging the above. This is why it is necessary
             ! to pass pa_i_before to this routine rather than just using a_i_2d.
             !
@@ -442,13 +442,13 @@ CONTAINS
 
             ! --- Adjust other floe size categories
             !
-            ! New ice area is only added to one floe size category, rk.
-            ! So for the remaining floe size categories, r:
+            ! New ice area is only added to one floe size category, sk.
+            ! So for the remaining floe size categories, s:
             !
-            !    [ L(r,h)g(h)drdh ]_after = [ L(r,h)g(h)drdh ]_before
+            !    [ L(s,h)g(h)dsdh ]_after = [ L(s,h)g(h)dsdh ]_before
             !
-            ! Since g(h)_before /= g(h)_after, L(r,h)_before /= L(r,h)_after.
-            ! Rearranging gives L(r,h)_after and is thus updated:
+            ! Since g(h)_before /= g(h)_after, L(s,h)_before /= L(s,h)_after.
+            ! Rearranging gives L(s,h)_after and is thus updated:
             !
             DO jf = 1, nn_nfsd
                IF( jf /= kcat ) pa_ifsd(jf) = pa_ifsd(jf)*pa_i_before / (pa_i_before + pa_newice)
@@ -631,25 +631,25 @@ CONTAINS
    END SUBROUTINE ice_fsd_welding
 
 
-   SUBROUTINE ice_fsd_thd_evolve( pa_ifsd, pG_r )
+   SUBROUTINE ice_fsd_thd_evolve( pa_ifsd, pG_s )
       !!-------------------------------------------------------------------
       !!               ***  ROUTINE ice_fsd_thd_evolve  ***
       !!
       !! ** Purpose :   Evolve the floe size distribution subject to lateral
       !!                growth/melt
       !!
-      !! ** Method  :   dL(r,h)/dt = -G_r * div_r(L) + (2/r) * G_r * L(r,h)
+      !! ** Method  :   dL(s,h)/dt = -G_s * div_s(L) + (2/s) * G_s * L(s,h)
       !!
-      !!                where L(r,h) is the floe size (r) distribution at
+      !!                where L(s,h) is the floe size (s) distribution at
       !!                             thickness h
-      !!                      div_r  is divergence in r-space
-      !!                      G_r    is the lateral growth/melt rate, assumed
-      !!                             to be independent of r and h, and G_r > 0
+      !!                      div_s  is divergence in s-space
+      !!                      G_s    is the lateral growth/melt rate ds/dt, assumed
+      !!                             to be independent of s and h, and G_s > 0
       !!                             implies growth
       !!
       !!                This equation is derived by Horvat and Tziperman (2015)
       !!                and adapted to the modified-areal floe size distribution
-      !!                L(r,h) by Roach et al. (2018). This routine integrates
+      !!                L(s,h) by Roach et al. (2018). This routine integrates
       !!                it forwards (for one thickness category) by one model
       !!                time step using adaptive time stepping (Horvat and
       !!                Tziperman, 2017). The adaptive time step is calculated
@@ -657,7 +657,9 @@ CONTAINS
       !!
       !! ** Input   :   pa_ifsd(nn_nfsd) : floe size distribution at one grid
       !!                                   point and for one thickness category
-      !!                pG_r             : lateral growth/melt rate in m/s
+      !!                pG_s             : lateral growth/melt rate in m/s. Specifically ds/dt;
+      !!                                   important as Horvat and Tziperman (2015) use 'radius'
+      !!                                   whereas we have diameter for floe size (ds/dt = 2dr/dt).
       !!
       !! ** Note    :   This routine does not implement creation of new ice area or
       !!                loss of ice area due to complete melt of existing floes. Those
@@ -679,7 +681,7 @@ CONTAINS
       !!-------------------------------------------------------------------
       !
       REAL(wp), DIMENSION(nn_nfsd), INTENT(inout) ::   pa_ifsd   ! FSD at one location, one thickness cat.
-      REAL(wp),                     INTENT(in)    ::   pG_r      ! lateral growth/melt rate (m/s)
+      REAL(wp),                     INTENT(in)    ::   pG_s      ! lateral growth/melt rate (ds/dt; m/s)
       !
       REAL(wp), DIMENSION(nn_nfsd) ::   za_ifsd_tend      ! FSD tendency (left side of eq. above)
       REAL(wp), DIMENSION(nn_nfsd) ::   zdiv_fsd          ! divergence term in equation
@@ -702,29 +704,29 @@ CONTAINS
          za_ifsd_tend(:) = 0._wp   ! initialise (or reset with loop iteration)
          zdiv_fsd    (:) = 0._wp
 
-         ! --- Calculate the divergence term [div(L), without the -G_r factor]
+         ! --- Calculate the divergence term [div(L), without the -G_s factor]
          !     of the FSD thermodynamic tendency equation using the divergence
          !     theorem.
          !
          ! The divergence in floe category jf equals the net 'flux' of floes
          ! out of that category. Since only growth or melt occurs at once, the
-         ! array indices are different depending on the sign of pG_r. In
+         ! array indices are different depending on the sign of pG_s. In
          ! growth, floes move from smaller to larger floe size categories only,
          ! so the 'flux' of floes from category jf is directed into category
          ! jf+1, while for melt it is into category jf-1.
          !
-         IF( pG_r > 0._wp ) THEN   ! lateral growth
+         IF( pG_s > 0._wp ) THEN   ! lateral growth
 
             DO jf = 2, nn_nfsd-1
-               zdiv_fsd(jf) = (   (pa_ifsd(jf  ) / floe_dr(jf  ) )     &
-                  &             - (pa_ifsd(jf-1) / floe_dr(jf-1) ) )
+               zdiv_fsd(jf) = (   (pa_ifsd(jf  ) / floe_ds(jf  ) )     &
+                  &             - (pa_ifsd(jf-1) / floe_ds(jf-1) ) )
             ENDDO
 
             ! Smallest category: no 'floe flux' from smaller category:
-            zdiv_fsd(1) = pa_ifsd(1) / floe_dr(1)
+            zdiv_fsd(1) = pa_ifsd(1) / floe_ds(1)
 
             ! Largest category: no 'floe flux' leaving this category:
-            zdiv_fsd(nn_nfsd) = -pa_ifsd(nn_nfsd-1) / floe_dr(nn_nfsd-1)
+            zdiv_fsd(nn_nfsd) = -pa_ifsd(nn_nfsd-1) / floe_ds(nn_nfsd-1)
 
             cln = 'o'   ! for warning print, to indicate ice_thd_do is calling
 
@@ -733,29 +735,29 @@ CONTAINS
             ! Note 'flux' of floes from category jf+1 goes into category jf
             ! which is a convergence in category jf, so need a minus sign
             ! for that term. But that minus sign is already provided by
-            ! pG_r < 0, so need to add an extra minus sign to this and
+            ! pG_s < 0, so need to add an extra minus sign to this and
             ! other 'flux' terms throughout so it cancels out later.
             !
-            ! ToDo: may be clearer to write these fluxes with zG_r
+            ! ToDo: may be clearer to write these fluxes with zG_s
             !       included in both growth and melt cases?
             !
             DO jf = 2, nn_nfsd-1
-               zdiv_fsd(jf) = (   (pa_ifsd(jf+1) / floe_dr(jf+1) )     &
-                  &             - (pa_ifsd(jf  ) / floe_dr(jf  ) ) )
+               zdiv_fsd(jf) = (   (pa_ifsd(jf+1) / floe_ds(jf+1) )     &
+                  &             - (pa_ifsd(jf  ) / floe_ds(jf  ) ) )
             ENDDO
 
             ! Smallest category: there is a 'floe flux' leaving this category,
             ! but it represents complete melt of smallest floes and results in
-            ! ice area loss. So that flux, which would be pa_ifsd(1) / floe_dr(1),
+            ! ice area loss. So that flux, which would be pa_ifsd(1) / floe_ds(1),
             ! is not here because this routine is just shifting ice between floe
             ! size categories, but the term appears directly in routine ice_thd_da.
             !
             ! Meanwhile, here we just have the 'floe flux' from category 2:
             !
-            zdiv_fsd(1) = pa_ifsd(2) / floe_dr(2)
+            zdiv_fsd(1) = pa_ifsd(2) / floe_ds(2)
 
             ! Largest category: no 'floe flux' from larger category:
-            zdiv_fsd(nn_nfsd) = -pa_ifsd(nn_nfsd) / floe_dr(nn_nfsd)
+            zdiv_fsd(nn_nfsd) = -pa_ifsd(nn_nfsd) / floe_ds(nn_nfsd)
 
             cln = 'a'   ! for warning print, to indicate ice_thd_da is calling
 
@@ -765,19 +767,19 @@ CONTAINS
          !
          ! Sum over all floe size categories of the tendency equation must (in
          ! theory) be zero, because int(L dr) = 1 by definition, and so
-         ! d/dt( int(L dr)) = 0. The divergence term also integrates to zero:
+         ! d/dt( int(L ds)) = 0. The divergence term also integrates to zero:
          ! indeed all elements of zdiv_fsd computed above cancel out when summed.
          ! Therefore, second term on RHS should sum to zero. In case of noise,
          ! which would manifest as spurious ice area, compute its integral,
          ! zfsd_cor, and subtract it from the actual tendency in each category
          ! weighted by that category's area fraction.
          !
-         zfsd_cor = 2._wp * pG_r * SUM( pa_ifsd(:) / floe_rc(:) )
+         zfsd_cor = 2._wp * pG_s * SUM( pa_ifsd(:) / floe_sc(:) )
 
          ! --- Compute rate of change of FSD in each floe size category:
          DO jf = 1, nn_nfsd
-            za_ifsd_tend(jf) = -pG_r * zdiv_fsd(jf)                                   &
-               &               + 2._wp * pG_r * pa_ifsd(jf) * (1._wp / floe_rc(jf))   &
+            za_ifsd_tend(jf) = -pG_s * zdiv_fsd(jf)                                   &
+               &               + 2._wp * pG_s * pa_ifsd(jf) * (1._wp / floe_sc(jf))   &
                &               - pa_ifsd(jf) * zfsd_cor
          ENDDO
 
@@ -875,10 +877,10 @@ CONTAINS
       !! ** Purpose :   Calculate floe perimeter density from floe size
       !!                distribution
       !!
-      !! ** Method  :   P = int[ (2/r) * F(r) dr ]
+      !! ** Method  :   P = (pi / a_shape) * int[ (F(s)/s) ds ]
       !!
-      !!                where F(r) = floe size distribution
-      !!                      int  = integral over all floe sizes, r
+      !!                where F(s) = floe size distribution
+      !!                      int  = integral over all floe sizes, s
       !!
       !! ** Note    :  Perimeter density is the total perimeter of an
       !!               ensemble of floes divided by the total sea ice area
@@ -908,8 +910,10 @@ CONTAINS
       fsd_peri_dens = 0._wp   ! initialise
 
       DO jf = 1, nn_nfsd
-         fsd_peri_dens = fsd_peri_dens + 2._wp * pfsd(jf) / floe_rc(jf)
+         fsd_peri_dens = fsd_peri_dens + pfsd(jf) / floe_sc(jf)
       ENDDO
+
+      fsd_peri_dens = fsd_peri_dens * rpi / rn_floeshape
 
    END FUNCTION fsd_peri_dens
 
@@ -927,13 +931,13 @@ CONTAINS
       !
       INTEGER, INTENT(in) ::   kt                    ! ocean time step index
       !
-      REAL(wp), DIMENSION(A2D(0))     ::   zravg       ! mean floe radius, grid cell (m)
+      REAL(wp), DIMENSION(A2D(0))     ::   zsavg       ! mean floe size, grid cell (m)
       REAL(wp), DIMENSION(A2D(0))     ::   zperi       ! perimeter density, grid cell (m.m-2)
-      REAL(wp), DIMENSION(A2D(0))     ::   zleff       ! effective floe size, grid cell (m)
+      REAL(wp), DIMENSION(A2D(0))     ::   zseff       ! effective floe size, grid cell (m)
       REAL(wp), DIMENSION(A2D(0))     ::   zmsk00      ! 0% conc. mask, grid cell
       REAL(wp), DIMENSION(A2D(0))     ::   zmsk1_ati   ! mask = 1/at_i (ice) or 0 (no ice)
       REAL(wp), DIMENSION(A2D(0),jpl) ::   zperi_cat   ! perimeter density, each ITD category (m.m-2)
-      REAL(wp), DIMENSION(A2D(0),jpl) ::   zleff_cat   ! effective floe size, each ITD category (m)
+      REAL(wp), DIMENSION(A2D(0),jpl) ::   zseff_cat   ! effective floe size, each ITD category (m)
       REAL(wp), DIMENSION(A2D(0),jpl) ::   zmsk00c     ! 0% conc. mask, each ITD category
       !
       REAL(wp), DIMENSION(A2D(0),nn_nfsd,jpl) :: zmsk00fc         ! 0% conc. mask, each ITD and FSD category
@@ -960,58 +964,57 @@ CONTAINS
 
       ! --- Calculate outputs
       !
-      zleff_cat(A2D(0),:) = 0._wp   ! initialise
-      zleff    (A2D(0))   = 0._wp
-      zravg    (A2D(0))   = 0._wp
+      zseff_cat(A2D(0),:) = 0._wp   ! initialise
+      zseff    (A2D(0))   = 0._wp
+      zsavg    (A2D(0))   = 0._wp
       !
       DO_2D(0, 0, 0, 0)
          !
-         ! FSD integrated over ITD. Note this gives F(r)dr, the area of ice in
-         ! floe size range [r, r+dr] per unit ocean area.
+         ! FSD integrated over ITD. Note this gives F(s)ds, the area of ice in
+         ! floe size range [s, s+ds] per unit ocean area.
          !
-         ! In this jf loop also calculate perimeter density distribution,
-         ! given by rho(r)dr = (2/r)F(r)dr/at_i.
+         ! In this jf loop also calculate perimeter density distribution [rho(s)ds].
          !
-         ! In this jf loop also calculate mean floe radius, zravg, given by
-         ! area-weighted mean floe radius across thickness categories.
+         ! In this jf loop also calculate mean floe size, zsavg, given by
+         ! area-weighted mean floe size across thickness categories.
          !
          DO jf = 1, nn_nfsd
             zfsd (ji,jj,jf) = SUM( a_ifsd(ji,jj,jf,:) * a_i(ji,jj,:) )
-            zpdd (ji,jj,jf) =      (2._wp / floe_rc(jf)) * zfsd(ji,jj,jf) * zmsk1_ati(ji,jj)
-            zravg(ji,jj)    = zravg(ji,jj) + floe_rc(jf) * zfsd(ji,jj,jf)
+            zpdd (ji,jj,jf) = (rpi * zfsd(ji,jj,jf) * zmsk1_ati(ji,jj) ) / (rn_floeshape * floe_sc(jf))
+            zsavg(ji,jj)    = zsavg(ji,jj) + floe_sc(jf) * zfsd(ji,jj,jf)
          ENDDO
          !
          ! Perimeter density and effective floe size, per ITD category:
          DO jl = 1, jpl
             zperi_cat(ji,jj,jl) = fsd_peri_dens( a_ifsd(ji,jj,:,jl) )
-            IF( zperi_cat(ji,jj,jl) >= epsi06 ) zleff_cat(ji,jj,jl) = 4._wp / zperi_cat(ji,jj,jl)
+            IF( zperi_cat(ji,jj,jl) >= epsi06 ) zseff_cat(ji,jj,jl) = rpi / (zperi_cat(ji,jj,jl) * rn_floeshape)
          ENDDO
          !
          ! Perimeter density and effective floe size, for all ice,
          ! calculated as area-weighted average of category versions:
          zperi(ji,jj) = SUM( zperi_cat(ji,jj,:) * a_i(ji,jj,:) ) * zmsk1_ati(ji,jj)
-         zleff(ji,jj) = SUM( zleff_cat(ji,jj,:) * a_i(ji,jj,:) ) * zmsk1_ati(ji,jj)
+         zseff(ji,jj) = SUM( zseff_cat(ji,jj,:) * a_i(ji,jj,:) ) * zmsk1_ati(ji,jj)
          !
       END_2D
 
       ! --- Write constant fields to output (if requested, case-by-case)
-      IF(iom_use( 'icefsd_rl' )) CALL iom_put( 'icefsd_rl' , floe_rl(:) )
-      IF(iom_use( 'icefsd_rc' )) CALL iom_put( 'icefsd_rc' , floe_rc(:) )
-      IF(iom_use( 'icefsd_ru' )) CALL iom_put( 'icefsd_ru' , floe_ru(:) )
+      IF(iom_use( 'icefsd_sl' )) CALL iom_put( 'icefsd_sl' , floe_sl(:) )
+      IF(iom_use( 'icefsd_sc' )) CALL iom_put( 'icefsd_sc' , floe_sc(:) )
+      IF(iom_use( 'icefsd_su' )) CALL iom_put( 'icefsd_su' , floe_su(:) )
       IF(iom_use( 'icefsd_al' )) CALL iom_put( 'icefsd_al' , floe_al(:) )
       IF(iom_use( 'icefsd_ac' )) CALL iom_put( 'icefsd_ac' , floe_ac(:) )
       IF(iom_use( 'icefsd_au' )) CALL iom_put( 'icefsd_au' , floe_au(:) )
-      IF(iom_use( 'icefsd_dr' )) CALL iom_put( 'icefsd_dr' , floe_dr(:) )
+      IF(iom_use( 'icefsd_ds' )) CALL iom_put( 'icefsd_ds' , floe_ds(:) )
 
       ! --- Write variable fields to output (if requested, case-by-case)
       IF(iom_use( 'icefsd_cat'     )) CALL iom_put( 'icefsd_cat'     , a_ifsd   (A2D(0),:,:) * zmsk00fc )
       IF(iom_use( 'icefsd'         )) CALL iom_put( 'icefsd'         , zfsd     (A2D(0),:)   * zmsk00f  )
       IF(iom_use( 'icepdd'         )) CALL iom_put( 'icepdd'         , zpdd     (A2D(0),:)   * zmsk00f  )
       IF(iom_use( 'icefsdperi_cat' )) CALL iom_put( 'icefsdperi_cat' , zperi_cat(A2D(0),:)   * zmsk00c  )
-      IF(iom_use( 'icefsdleff_cat' )) CALL iom_put( 'icefsdleff_cat' , zleff_cat(A2D(0),:)   * zmsk00c  )
+      IF(iom_use( 'icefsdseff_cat' )) CALL iom_put( 'icefsdseff_cat' , zseff_cat(A2D(0),:)   * zmsk00c  )
       IF(iom_use( 'icefsdperi'     )) CALL iom_put( 'icefsdperi'     , zperi    (A2D(0))     * zmsk00   )
-      IF(iom_use( 'icefsdleff'     )) CALL iom_put( 'icefsdleff'     , zleff    (A2D(0))     * zmsk00   )
-      IF(iom_use( 'icefsdravg'     )) CALL iom_put( 'icefsdravg'     , zravg    (A2D(0))     * zmsk00   )
+      IF(iom_use( 'icefsdseff'     )) CALL iom_put( 'icefsdseff'     , zseff    (A2D(0))     * zmsk00   )
+      IF(iom_use( 'icefsdsavg'     )) CALL iom_put( 'icefsdsavg'     , zsavg    (A2D(0))     * zmsk00   )
 
    END SUBROUTINE ice_fsd_wri
 
@@ -1025,7 +1028,7 @@ CONTAINS
       !! ** Method  :   The change in floe size-thickness distribution, FSTD = a_ifsd*a_i,
       !!                is calculated as (FSTD_a - FSTD_b) / rDt_ice, where '_a' and '_b' refer to
       !!                after and before the process of which the tendency is computed. This is done
-      !!                similarly for other FSD-related diagnostics such as mean floe radius.
+      !!                similarly for other FSD-related diagnostics such as mean floe size.
       !!                Diagnostics are sent to IOM as required.
       !!
       !! ** Inputs  :   Length-3 character name of process for diagnostic suffix (e.g., 'lam' for lateral melt)
@@ -1048,7 +1051,7 @@ CONTAINS
       REAL(wp), DIMENSION(A2D(0))             ::   zmsk00       ! Ice present mask (2D)
       REAL(wp), DIMENSION(A2D(0),nn_nfsd,jpl) ::   zdfstd       ! Tendency of FSTD
       REAL(wp), DIMENSION(A2D(0),nn_nfsd)     ::   zdfsd        ! Tendency of FSD (FSTD integrated over ITD)
-      REAL(wp), DIMENSION(A2D(0))             ::   zdravg       ! Tendency of mean floe radius
+      REAL(wp), DIMENSION(A2D(0))             ::   zdsavg       ! Tendency of mean floe size (m/s)
       REAL(wp), DIMENSION(A2D(0))             ::   zat_ia       ! Total ice concentration (after process)
       INTEGER                                 ::   ji, jj, jf   ! dummy loop indices
       !
@@ -1067,7 +1070,7 @@ CONTAINS
 
       ! Calculate tendency diagnostics:
       !
-      zdravg(:,:) = 0._wp  ! initialise
+      zdsavg(:,:) = 0._wp  ! initialise
       !
       DO_2D(0, 0, 0, 0)
          !
@@ -1077,8 +1080,8 @@ CONTAINS
             zdfsd(ji,jj,jf) = r1_Dt_ice * (  SUM(pa_ifsda(ji,jj,jf,:) * pa_ia(ji,jj,:))   &
                &                           - SUM(pa_ifsdb(ji,jj,jf,:) * pa_ib(ji,jj,:))   )
             !
-            ! mean floe radius from integrating FSD, above, which already has 1/dt factor:
-            zdravg(ji,jj) = zdravg(ji,jj) + floe_rc(jf) * zdfsd(ji,jj,jf)
+            ! mean floe size from integrating FSD, above, which already has 1/dt factor:
+            zdsavg(ji,jj) = zdsavg(ji,jj) + floe_sc(jf) * zdfsd(ji,jj,jf)
          ENDDO
          !
       END_2D
@@ -1098,8 +1101,8 @@ CONTAINS
       cl_ref = 'icefsd_tend'//TRIM(cl_sfx)
       IF( iom_use( cl_ref ) )   CALL iom_put( cl_ref, zdfsd  * zmsk00f  )
 
-      cl_ref = 'icefsdravg_tend'//TRIM(cl_sfx)
-      IF( iom_use( cl_ref ) )   CALL iom_put( cl_ref, zdravg * zmsk00   )
+      cl_ref = 'icefsdsavg_tend'//TRIM(cl_sfx)
+      IF( iom_use( cl_ref ) )   CALL iom_put( cl_ref, zdsavg * zmsk00   )
 
    END SUBROUTINE ice_fsd_dia
 
@@ -1118,33 +1121,33 @@ CONTAINS
       !!                   2 = compute bounds with increasing spacing following Gaussian profile
       !!                   3 = compute bounds with exponentially-increasing spacing
       !!
-      !!                For 1-3, bounds are placed between a minimum and maximum floe size (radius)
-      !!                set via namelist parameters rn_fsd_rmin and rn_fsd_rmax. For 2-3, an additional
-      !!                parameter rn_fsd_rspc controls the degree of curvature/non-linearity in the
+      !!                For 1-3, bounds are placed between a minimum and maximum floe size (caliper diameter)
+      !!                set via namelist parameters rn_fsd_smin and rn_fsd_smax. For 2-3, an additional
+      !!                parameter rn_fsd_spc controls the degree of curvature/non-linearity in the
       !!                Gaussian or exponential curve.
       !!
-      !!                nn_fsd_catini = 2 (Gaussian spacing)
+      !!                nn_fsd_catini = 2 (Gaussian spacing); limits L(j) are computed as:
       !!
-      !!                      L(j) = L(j-1) + k * [1 - EXP( -( (j-1)/(s*n) )^2 )]   for   j = 2..(n+1)
+      !!                      L(j) = L(j-1) + k * [1 - EXP( -( (j-1)/(sigma*n) )^2 )]   for   j = 2..(n+1)
       !!
-      !!                   where n = nn_nfsd, s = rn_fsd_rspc, k is calculated to ensure that
-      !!                   L(n+1) = rmax, and L(1) is defined to be rmin. The exponent includes a
-      !!                   factor of n so that the overall shape is not affected by changing rmin or
-      !!                   rmax and to make s a 'scaling' parameter rather than depending on choice of n.
+      !!                   where n = nn_nfsd, sigma = rn_fsd_spc, k is calculated to ensure that
+      !!                   L(n+1) = smax, and L(1) is defined to be smin. The exponent includes a
+      !!                   factor of n so that the overall shape is not affected by changing smin or
+      !!                   smax and to make sigma a 'scaling' parameter rather than depending on choice of n.
       !!
-      !!                nn_fsd_catini = 3 (exponentially-increasing spacing)
+      !!                nn_fsd_catini = 3 (exponentially-increasing spacing); limits L(j) are computed as:
       !!
-      !!                      L(j) = L(j-1) + k * EXP( 10*s*(j-1)/n )   for   j = 2..(n+1)
+      !!                      L(j) = L(j-1) + k * EXP( 10*sigma*(j-1)/n )   for   j = 2..(n+1)
       !!
       !!                   with parameters defined similarly to the Gaussian case. Here an ad-hoc factor
       !!                   of 10 is included to set an appropriate degree of non-linearity with default
-      !!                   parameters. Particularly, increasing s much beyond 1 here can make spacing so
+      !!                   parameters. Particularly, increasing sigma much beyond 1 here can make spacing so
       !!                   small (at lower j) that it cannot be resolved. In all cases, a warning is thus
       !!                   written if any category width is below 1cm (arbitrarily).
       !!
-      !!             Category limits are printed in ocean.output. The limits are then used to calculate
-      !!             other related constant arrays, including the floe areas, welding array (floe_iweld),
-      !!             and gradient in log space (for subroutine ice_fsd_brit).
+      !!                Category limits are printed in ocean.output. The limits are then used to calculate
+      !!                other related constant arrays, including the floe areas, welding array (floe_iweld),
+      !!                and gradient in log space (for subroutine ice_fsd_brit).
       !!
       !!-------------------------------------------------------------------
       !
@@ -1158,11 +1161,11 @@ CONTAINS
       !
       !!-------------------------------------------------------------------
 
-      ALLOCATE(floe_rl(nn_nfsd), floe_rc(nn_nfsd), floe_ru(nn_nfsd), floe_dr(nn_nfsd),   &
+      ALLOCATE(floe_sl(nn_nfsd), floe_sc(nn_nfsd), floe_su(nn_nfsd), floe_ds(nn_nfsd),   &
          &     floe_al(nn_nfsd), floe_ac(nn_nfsd), floe_au(nn_nfsd),                     &
-         &     floe_dlog_rc(nn_nfsd-1), floe_iweld(nn_nfsd, nn_nfsd), STAT=ierr)
+         &     floe_dlog_sc(nn_nfsd-1), floe_iweld(nn_nfsd, nn_nfsd), STAT=ierr)
 
-      IF (ierr /= 0) CALL ctl_stop('fsd_init_bounds: could not allocate FSD radii/area arrays')
+      IF (ierr /= 0) CALL ctl_stop('fsd_init_bounds: could not allocate FSD size/area arrays')
 
       znfsd = REAL(nn_nfsd, KIND=wp)   ! for some computation of category limits below
 
@@ -1175,18 +1178,18 @@ CONTAINS
             zlims(:) = rn_fsd_catbnd(1:nn_nfsd+1)
             !
             ! These should NOT be used anywhere outside this routine, but just in case:
-            rn_fsd_rmin = zlims(1)
-            rn_fsd_rmax = zlims(nn_nfsd+1)
+            rn_fsd_smin = zlims(1)
+            rn_fsd_smax = zlims(nn_nfsd+1)
             !
          CASE( 1 )   ! === Uniformly-spaced bounds === !
             !
             IF(lwp) WRITE(numout,*) 'nn_fsd_catini = 1  ==>>  FSD category limits are uniformly spaced:'
             !
-            zlims(1)         = rn_fsd_rmin
-            zlims(nn_nfsd+1) = rn_fsd_rmax
+            zlims(1)         = rn_fsd_smin
+            zlims(nn_nfsd+1) = rn_fsd_smax
             !
             DO jf1 = 2, nn_nfsd
-               zlims(jf1) = rn_fsd_rmin + (rn_fsd_rmax - rn_fsd_rmin) * REAL(jf1 - 1, KIND=wp) / znfsd
+               zlims(jf1) = rn_fsd_smin + (rn_fsd_smax - rn_fsd_smin) * REAL(jf1 - 1, KIND=wp) / znfsd
             ENDDO
             !
          CASE( 2 )   ! === Gaussian-spaced bounds === !
@@ -1196,13 +1199,13 @@ CONTAINS
             ! Determine multiplier k:
             zk = 0._wp
             DO jf1 = 1, nn_nfsd
-               zk = zk + 1._wp - EXP( -( REAL(nn_nfsd - jf1 + 1, KIND=wp) / (rn_fsd_rspc * znfsd) )**2 )
+               zk = zk + 1._wp - EXP( -( REAL(nn_nfsd - jf1 + 1, KIND=wp) / (rn_fsd_spc * znfsd) )**2 )
             ENDDO
-            zk = (rn_fsd_rmax - rn_fsd_rmin) / zk
+            zk = (rn_fsd_smax - rn_fsd_smin) / zk
             !
-            zlims(1) = rn_fsd_rmin
+            zlims(1) = rn_fsd_smin
             DO jf1 = 2, nn_nfsd + 1
-               zlims(jf1) = zlims(jf1-1) + zk * ( 1._wp - EXP( -(REAL(jf1 - 1, KIND=wp) / (rn_fsd_rspc * znfsd) )**2) )
+               zlims(jf1) = zlims(jf1-1) + zk * ( 1._wp - EXP( -(REAL(jf1 - 1, KIND=wp) / (rn_fsd_spc * znfsd) )**2) )
             ENDDO
             !
          CASE( 3 )   ! === Exponentially-spaced bounds === !
@@ -1212,13 +1215,13 @@ CONTAINS
             ! Determine multiplier k:
             zk = 0._wp
             DO jf1 = 2, nn_nfsd + 1
-               zk = zk + EXP( 10._wp * rn_fsd_rspc * REAL(jf1 - 1, KIND=wp) / znfsd )
+               zk = zk + EXP( 10._wp * rn_fsd_spc * REAL(jf1 - 1, KIND=wp) / znfsd )
             ENDDO
-            zk = (rn_fsd_rmax - rn_fsd_rmin) / zk
+            zk = (rn_fsd_smax - rn_fsd_smin) / zk
             !
-            zlims(1) = rn_fsd_rmin
+            zlims(1) = rn_fsd_smin
             DO jf1 = 2, nn_nfsd + 1
-               zlims(jf1) = zlims(jf1-1) + zk * EXP( 10._wp * rn_fsd_rspc * REAL(jf1 - 1, KIND=wp) / znfsd )
+               zlims(jf1) = zlims(jf1-1) + zk * EXP( 10._wp * rn_fsd_spc * REAL(jf1 - 1, KIND=wp) / znfsd )
             ENDDO
             !
          CASE DEFAULT
@@ -1227,51 +1230,51 @@ CONTAINS
             !
       ENDSELECT
 
-      floe_rl = zlims(1:nn_nfsd)
-      floe_ru = zlims(2:nn_nfsd+1)
-      floe_rc = .5_wp * (floe_ru + floe_rl)
+      floe_sl = zlims(1:nn_nfsd)
+      floe_su = zlims(2:nn_nfsd+1)
+      floe_sc = .5_wp * (floe_su + floe_sl)
 
-      floe_dr = floe_ru - floe_rl
+      floe_ds = floe_su - floe_sl
 
       ! Write FSD bounds in ocean.output (continuing from control print in ice_fsd_init)
       IF(lwp) THEN
          WRITE(numout,*)
          DO jf1 = 1, nn_nfsd
             WRITE(numout,'(A,F12.5,A,I2,A,F12.5,A)') '                         ',   &
-               &    floe_rl(jf1), ' m <= category ', jf1, ' < ', floe_ru(jf1), ' m'
+               &    floe_sl(jf1), ' m <= category ', jf1, ' < ', floe_su(jf1), ' m'
          ENDDO
-         WRITE(numout,*) ''
+         WRITE(numout,*)
          !
          ! Write uniform or min./max. category width(s):
          IF( nn_fsd_catini == 1 ) THEN
             WRITE(numout,'(A,A,F12.5,A)') '                      ',   &
-               &   '==>>> Uniform categories of width: ', floe_dr(1), ' m'
+               &   '==>>> Uniform categories of width: ', floe_ds(1), ' m'
          ELSE
             WRITE(numout,'(A,A,F12.5,A)') '           ',   &
-               &   '==>>> Non-uniform categories, smallest width: ', MINVAL(floe_dr(:)), ' m'
+               &   '==>>> Non-uniform categories, smallest width: ', MINVAL(floe_ds(:)), ' m'
             WRITE(numout,'(A,A,F12.5,A)') '           ',   &
-               &   '                               largest width: ', MAXVAL(floe_dr(:)), ' m'
+               &   '                               largest width: ', MAXVAL(floe_ds(:)), ' m'
          ENDIF
          WRITE(numout,*) ''
       ENDIF
 
       ! Sometimes automatic category spacing is too small, particularly in exponential case
       ! Check for small category widths and warn with suggested changes in each case:
-      IF( ANY( ABS(floe_dr(:)) < 1.e-2 ) ) THEN
+      IF( ANY( ABS(floe_sl(:)) < 1.e-2 ) ) THEN
          CALL ctl_warn('fsd_init_bounds: some FSD categories are very small, < 1cm width; consider:'   ,   &
                &       '                 nn_fsd_catini = 0  : making your categories wider'            ,   &
-               &       '                 nn_fsd_catini = 1-2: (in/de)creasing rn_fsd_rmin/rn_fsd_rmax)',   &
-               &       '                 nn_fsd_catini = 2-3: decreasing rn_fsd_rspc (recommend <= 1)'     )
+               &       '                 nn_fsd_catini = 1-2: (in/de)creasing rn_fsd_smin/rn_fsd_smax)',   &
+               &       '                 nn_fsd_catini = 2-3: decreasing rn_fsd_spc  (recommend <= 1)'     )
       ENDIF
 
-      floe_al = 4._wp * rn_floeshape * floe_rl ** 2
-      floe_ac = 4._wp * rn_floeshape * floe_rc ** 2
-      floe_au = 4._wp * rn_floeshape * floe_ru ** 2
+      floe_al = rn_floeshape * floe_sl ** 2
+      floe_ac = rn_floeshape * floe_sc ** 2
+      floe_au = rn_floeshape * floe_su ** 2
 
       ! --- Calculate category index of default new ice floe size set in namelist
       nf_newice = nn_nfsd
       DO jf1 = nn_nfsd-1, 1, -1
-         IF( (rn_fsd_r_newice >= floe_rl(jf1)) .AND. (rn_fsd_r_newice < floe_ru(jf1)) ) THEN
+         IF( (rn_fsd_s_newice >= floe_sl(jf1)) .AND. (rn_fsd_s_newice < floe_su(jf1)) ) THEN
             nf_newice = jf1
             EXIT
          ENDIF
@@ -1301,12 +1304,12 @@ CONTAINS
          ENDDO
       ENDDO
 
-      ! --- Calculate category spacing in log(r) space (for FSD restoring routine)
+      ! --- Calculate category spacing in log(s) space (for FSD restoring routine)
       !
-      floe_dlog_rc(:) = 0._wp   ! initialise
+      floe_dlog_sc(:) = 0._wp   ! initialise
       !
       DO jf1 = 1, nn_nfsd-1
-         floe_dlog_rc(jf1) = LOG(floe_rc(jf1+1)) - LOG(floe_rc(jf1))
+         floe_dlog_sc(jf1) = LOG(floe_sc(jf1+1)) - LOG(floe_sc(jf1))
       ENDDO
 
    END SUBROUTINE fsd_initbounds
@@ -1397,8 +1400,7 @@ CONTAINS
             DO jf = 1, nn_nfsd
                ! Calculate power law FSD number distribution based on Perovich
                ! and Jones (2014) and convert to area fraction distribution:
-               a_ifsd(:,:,jf,1) = (2._wp * floe_rc(jf)) ** (-rn_fsd_ini_alpha - 1._wp)   &
-                  &               * floe_ac(jf) * floe_dr(jf)
+               a_ifsd(:,:,jf,1) = floe_sc(jf) ** (-rn_fsd_ini_alpha - 1._wp) * floe_ac(jf) * floe_ds(jf)
 
                ztotfrac = ztotfrac + a_ifsd(1,1,jf,1)
             ENDDO
@@ -1440,9 +1442,9 @@ CONTAINS
       INTEGER ::   ios, ioptio   ! Local integer output status for namelist read
       INTEGER ::   ierr          ! Local integer allocate status
       !!
-      NAMELIST/namfsd/ ln_fsd          , nn_fsd_catini   , nn_nfsd        , rn_fsd_rmin     ,   &
-         &             rn_fsd_rmax     , rn_fsd_rspc     , rn_fsd_catbnd  , rn_floeshape    ,   &
-         &             nn_fsd_ini      , rn_fsd_ini_alpha, rn_fsd_r_newice, rn_fsd_t_restore,   &
+      NAMELIST/namfsd/ ln_fsd          , nn_fsd_catini   , nn_nfsd        , rn_fsd_smin     ,   &
+         &             rn_fsd_smax     , rn_fsd_spc      , rn_fsd_catbnd  , rn_floeshape    ,   &
+         &             nn_fsd_ini      , rn_fsd_ini_alpha, rn_fsd_s_newice, rn_fsd_t_restore,   &
          &             rn_fsd_amin_weld, rn_fsd_c_weld
       !!-------------------------------------------------------------------
       !
@@ -1458,13 +1460,13 @@ CONTAINS
          WRITE(numout,*) '      Floe size distribution activated or not                    ln_fsd = ', ln_fsd
          WRITE(numout,*) '         FSD category initialisation                      nn_fsd_catini = ', nn_fsd_catini
          WRITE(numout,*) '            Number of floe size categories                      nn_nfsd = ', nn_nfsd
-         WRITE(numout,*) '            Minimum floe size     (nn_fsd_catini /= 0  )    rn_fsd_rmin = ', rn_fsd_rmin
-         WRITE(numout,*) '            Maximum floe size     (nn_fsd_catini /= 0  )    rn_fsd_rmax = ', rn_fsd_rmax
-         WRITE(numout,*) '            Spacing non-linearity (nn_fsd_catini  = 2,3)    rn_fsd_rspc = ', rn_fsd_rspc
+         WRITE(numout,*) '            Minimum floe size     (nn_fsd_catini /= 0  )    rn_fsd_smin = ', rn_fsd_smin
+         WRITE(numout,*) '            Maximum floe size     (nn_fsd_catini /= 0  )    rn_fsd_smax = ', rn_fsd_smax
+         WRITE(numout,*) '            Spacing non-linearity (nn_fsd_catini  = 2,3)    rn_fsd_spc  = ', rn_fsd_spc
          WRITE(numout,*) '            Floe shape parameter, to determine floe areas  rn_floeshape = ', rn_floeshape
          WRITE(numout,*) '         FSD initialisation case (ln_iceini = T)             nn_fsd_ini = ', nn_fsd_ini
          WRITE(numout,*) '            Power law exponent  (nn_fsd_ini = 2)       rn_fsd_ini_alpha = ', rn_fsd_ini_alpha
-         WRITE(numout,*) '         Floe size of new ice (in absence of waves)    rn_fsd_r_newice  = ', rn_fsd_r_newice
+         WRITE(numout,*) '         Floe size of new ice (in absence of waves)    rn_fsd_s_newice  = ', rn_fsd_s_newice
          WRITE(numout,*) '         Floe welding minimum sea ice concentration    rn_fsd_amin_weld = ', rn_fsd_amin_weld
          WRITE(numout,*) '         Floe welding coefficient                         rn_fsd_c_weld = ', rn_fsd_c_weld
          WRITE(numout,*) '         FSD restoring (brittle fracture) time scale   rn_fsd_t_restore = ', rn_fsd_t_restore

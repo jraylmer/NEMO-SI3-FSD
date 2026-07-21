@@ -189,7 +189,7 @@ CONTAINS
                ! total cross-wind (or cross-current) floe edge per unit domain area in
                ! either case; see Tsamados et al. (2014) and docs for details.
                !
-               ! Note: changing FSD floe shape parameter (rn_floe_shape) will not correctly
+               ! Note: changing FSD floe shape parameter (rn_floeshape) will not consistently
                ! modify form drag due to floe edges since default Lupkes et al. (2012)
                ! formulation includes shape factor absorbed into coefficients (namelist
                ! parameters rn_Cf_i{a,o}), so cannot easily be accounted for at present.
@@ -197,7 +197,7 @@ CONTAINS
                DO jf = 1, nn_nfsd
                   zfsdi(jf) = SUM( a_ifsd(ji,jj,jf,:) * a_i(ji,jj,:) ) / zai
                ENDDO
-               zlfloe = 4._wp / fsd_peri_dens( zfsdi )  ! gives effective floe size
+               zlfloe = rpi / (rn_floeshape * fsd_peri_dens( zfsdi ))  ! gives effective floe size
             ELSE
                ! Original non-FSD implementation
                ! floe size parameterization see Eq. 13

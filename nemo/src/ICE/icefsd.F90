@@ -49,6 +49,8 @@ MODULE icefsd
    PUBLIC ::   ice_fsd_welding            ! routine called by ice_thd_do
    PUBLIC ::   ice_fsd_thd_evolve         ! routine called by ice_thd_d{a,o}
    PUBLIC ::   ice_fsd_timestep           ! routine called by ice_wav_frac
+   PUBLIC ::   fsd_eff_size               ! function called by ice_frm
+   PUBLIC ::   floe_size_dist             ! function called by ice_frm
    PUBLIC ::   fsd_peri_dens              ! function called by ice_thd_da
    PUBLIC ::   ice_fsd_cor                ! generic interface: small/negative value corrections and re-normalisation
 
@@ -86,6 +88,110 @@ MODULE icefsd
 #  include "read_nml_substitute.h90"
 
 CONTAINS
+
+   FUNCTION floe_size_dist( pa_ifsd, pa_i )
+      !!-------------------------------------------------------------------
+      !!                   *** FUNCTION floe_size_dist ***
+      !! ** Purpose :   Compute floe size distribution (FSD) from prognostic variables
+      !! ** Method  :   f(s)ds = int[ L(s,h)ds * g(h)dh ] (integrate over thickness h)
+      !! ** Input   :   pa_ifsd(nn_nfsd,jpl)    :  modified-areal floe size-thickness distribution L(s,h)ds
+      !!                pa_i   (        jpl)    :  ice thickness distribution, g(h)dh
+      !! ** Output  :   floe_size_dist(nn_nfsd) :  floe size distribution, f(s)ds
+      !!-------------------------------------------------------------------
+      REAL(wp), DIMENSION(nn_nfsd,jpl), INTENT(in) :: pa_ifsd          ! modified floe size-thickness distribution, L(s,h)ds
+      REAL(wp), DIMENSION(jpl)        , INTENT(in) :: pa_i             ! ice thickness distribution, g(h)dh
+      REAL(wp), DIMENSION(nn_nfsd)                 :: floe_size_dist   ! floe size distribution, f(s)ds
+      INTEGER                                      :: jf               ! dummy loop index
+      !!-------------------------------------------------------------------
+      floe_size_dist(:) = 0._wp
+      DO jf = 1, nn_nfsd
+         floe_size_dist(jf) = SUM( pa_ifsd(jf,:) * pa_i(:) )
+      ENDDO
+   END FUNCTION floe_size_dist
+
+
+   FUNCTION peri_dens_dist( pa_ifsd, pa_i )
+      !!-------------------------------------------------------------------
+      !!                   *** FUNCTION peri_dens_dist ***
+      !! ** Purpose :   Compute perimeter-density floe size distribution from prognostic variables
+      !! ** Method  :   p(s)ds = (pi / floeshape * c) * int[ (L(s,h)/s)ds * g(h)dh ] (integrate over thickness h)
+      !! ** Input   :   pa_ifsd(nn_nfsd,jpl)    : modified-areal floe size-thickness distribution L(s,h)ds
+      !!                pa_i   (        jpl)    : ice thickness distribution, g(h)dh
+      !! ** Output  :   peri_dens_dist(nn_nfsd) : perimeter-density floe size distribution, p(s)ds
+      !!-------------------------------------------------------------------
+      REAL(wp), DIMENSION(nn_nfsd,jpl), INTENT(in) :: pa_ifsd          ! modified floe size-thickness distribution, L(s,h)ds
+      REAL(wp), DIMENSION(jpl)        , INTENT(in) :: pa_i             ! ice thickness distribution, g(h)dh
+      REAL(wp)                                     :: zc               ! sea ice concentration, c
+      REAL(wp), DIMENSION(nn_nfsd)                 :: peri_dens_dist   ! perimeter density floe size distribution, p(s)ds
+      INTEGER                                      :: jf               ! dummy loop index
+      !!-------------------------------------------------------------------
+      peri_dens_dist(:) = 0._wp
+      zc = SUM( pa_i(:) )  ! sea ice concentration
+      IF( zc > epsi10 ) THEN
+         DO jf = 1, nn_nfsd
+            peri_dens_dist(jf) = rpi * SUM( pa_ifsd(jf,:) * pa_i(:) ) / (rn_floeshape * zc * floe_sc(jf))
+         ENDDO
+      ENDIF
+   END FUNCTION peri_dens_dist
+
+
+   FUNCTION fsd_peri_dens( pfsd )
+      !!-------------------------------------------------------------------
+      !!                   *** FUNCTION ice_fsd_peri ***
+      !! ** Purpose :   Compute perimeter density from floe size distribution
+      !! ** Method  :   rho = (pi / floeshape * a) * int[ (f(s)/s)ds ] (integrate over floe size s)
+      !!                where 'a' is the area fraction of ice over the thickness range relevant to f(s)ds
+      !! ** Input   :   pfsd(nn_nfsd) : floe size distribution f(s)ds OR L(s,h)ds
+      !! ** Output  :   fsd_peri_dens : perimeter density (units: m-1)
+      !!-------------------------------------------------------------------
+      REAL(wp), DIMENSION(nn_nfsd), INTENT(in)  ::   pfsd            ! floe size distribution, f(s)ds
+      REAL(wp)                                  ::   fsd_peri_dens   ! perimeter density, rho (units: m-1)
+      REAL(wp)                                  ::   za              ! sea ice area fraction
+      INTEGER                                   ::   jf              ! dummy loop index
+      !!-------------------------------------------------------------------
+      fsd_peri_dens = 0._wp   ! initialise
+      za = SUM(pfsd(:))
+      IF( za > epsi10 ) THEN
+         DO jf = 1, nn_nfsd
+            fsd_peri_dens = fsd_peri_dens + pfsd(jf) / floe_sc(jf)
+         ENDDO
+         ! Input pfsd can either be 'floe size distribution', f(s)ds, the sum (above to give za) of
+         ! which equals the sea ice concentration, or it can be the 'modified-areal floe size-thickness
+         ! distribution', i.e., the prognostic variable a_ifsd, the sum of which is 1. Thus either way,
+         ! the result below is correctly normalised to the relevant sea ice area (za):
+         fsd_peri_dens = fsd_peri_dens * rpi / (rn_floeshape * za)
+      ENDIF
+   END FUNCTION fsd_peri_dens
+
+
+   FUNCTION fsd_eff_size( pfsd )
+      !!-------------------------------------------------------------------
+      !!                   *** FUNCTION fsd_eff_size ***
+      !! ** Purpose :   Compute effective floe size from floe size distribution
+      !! ** Method  :   seff = a / int[ (f(s)/s)ds ] (integrate over floe size, s)
+      !!                where 'a' is the area fraction of ice over the thickness range relevant to f(s)ds
+      !! ** Input   :   pfsd(nn_nfsd) : floe size distribution f(s)ds OR L(s,h)ds
+      !! ** Output  :   fsd_eff_size  : effective floe size, seff (units: m)
+      !!-------------------------------------------------------------------
+      REAL(wp), DIMENSION(nn_nfsd), INTENT(in) ::   pfsd           ! floe size distribution, f(s)ds
+      REAL(wp)                                 ::   fsd_eff_size   ! effective floe size (units: m)
+      REAL(wp)                                 ::   za             ! sea ice area fraction
+      INTEGER                                  ::   jf             ! dummy loop index
+      !!-------------------------------------------------------------------
+      fsd_eff_size = 0._wp   ! initialise
+      za = SUM(pfsd(:))
+      IF( za > epsi10 ) THEN
+         DO jf = 1, nn_nfsd
+            fsd_eff_size = fsd_eff_size + pfsd(jf) / floe_sc(jf)
+         ENDDO
+         ! Input pfsd can either be 'floe size distribution', f(s)ds, the sum (above to give za) of
+         ! which equals the sea ice concentration, or it can be the 'modified-areal floe size-thickness
+         ! distribution', i.e., the prognostic variable a_ifsd, the sum of which is 1. Thus either way,
+         ! the result below is correctly normalised to the relevant sea ice area (za):
+         fsd_eff_size = za / fsd_eff_size
+      ENDIF
+   END FUNCTION fsd_eff_size
+
 
    SUBROUTINE fsd_cor_1d( pfsd )
       !!-------------------------------------------------------------------
@@ -870,54 +976,6 @@ CONTAINS
    END SUBROUTINE ice_fsd_timestep
 
 
-   FUNCTION fsd_peri_dens( pfsd )
-      !!-------------------------------------------------------------------
-      !!                   *** FUNCTION ice_fsd_peri ***
-      !!
-      !! ** Purpose :   Calculate floe perimeter density from floe size
-      !!                distribution
-      !!
-      !! ** Method  :   P = (pi / a_shape) * int[ (F(s)/s) ds ]
-      !!
-      !!                where F(s) = floe size distribution
-      !!                      int  = integral over all floe sizes, s
-      !!
-      !! ** Note    :  Perimeter density is the total perimeter of an
-      !!               ensemble of floes divided by the total sea ice area
-      !!               (Bateson et al. 2022). Multiply result by sea ice
-      !!               concentation to get floe perimeter per unit ocean area.
-      !!
-      !! ** Input   :  pfsd(nn_nfsd) : floe size distribution normalised to
-      !!                               sea ice area (at one location).
-      !!
-      !! ** Output  :  Perimeter density [m.m-2]
-      !!
-      !! ** References
-      !!    ----------
-      !!    Bateson, A. W., Feltham, D. L., Schroeder, D. S., Wang, Y., Hwang, B., Ridley, J. K. & Aksenov, Y. (2022).
-      !!              Sea ice floe size: its impact on pan-Arctic and local ice mass and required model complexity.
-      !!              The Cryosphere, 16, 2565-2593.
-      !!
-      !!-------------------------------------------------------------------
-      !
-      REAL(wp), DIMENSION(nn_nfsd), INTENT(in)  ::   pfsd   ! floe size distribution
-      REAL(wp)  :: fsd_peri_dens
-      !
-      INTEGER ::   jf   ! dummy loop index
-      !
-      !!-------------------------------------------------------------------
-
-      fsd_peri_dens = 0._wp   ! initialise
-
-      DO jf = 1, nn_nfsd
-         fsd_peri_dens = fsd_peri_dens + pfsd(jf) / floe_sc(jf)
-      ENDDO
-
-      fsd_peri_dens = fsd_peri_dens * rpi / rn_floeshape
-
-   END FUNCTION fsd_peri_dens
-
-
    SUBROUTINE ice_fsd_wri( kt )
       !!-------------------------------------------------------------------
       !!                 ***  ROUTINE ice_fsd_wri  ***
@@ -970,30 +1028,24 @@ CONTAINS
       !
       DO_2D(0, 0, 0, 0)
          !
-         ! FSD integrated over ITD. Note this gives F(s)ds, the area of ice in
-         ! floe size range [s, s+ds] per unit ocean area.
+         ! Floe size distribution and perimeter density distributions:
+         zfsd(ji,jj,:) = floe_size_dist( a_ifsd(ji,jj,:,:), a_i(ji,jj,:) )
+         zpdd(ji,jj,:) = peri_dens_dist( a_ifsd(ji,jj,:,:), a_i(ji,jj,:) )
          !
-         ! In this jf loop also calculate perimeter density distribution [rho(s)ds].
-         !
-         ! In this jf loop also calculate mean floe size, zsavg, given by
-         ! area-weighted mean floe size across thickness categories.
-         !
+         ! Area-weighted mean floe size:
          DO jf = 1, nn_nfsd
-            zfsd (ji,jj,jf) = SUM( a_ifsd(ji,jj,jf,:) * a_i(ji,jj,:) )
-            zpdd (ji,jj,jf) = (rpi * zfsd(ji,jj,jf) * zmsk1_ati(ji,jj) ) / (rn_floeshape * floe_sc(jf))
-            zsavg(ji,jj)    = zsavg(ji,jj) + floe_sc(jf) * zfsd(ji,jj,jf)
+            zsavg(ji,jj) = zsavg(ji,jj) + floe_sc(jf) * zfsd(ji,jj,jf)
          ENDDO
          !
          ! Perimeter density and effective floe size, per ITD category:
          DO jl = 1, jpl
             zperi_cat(ji,jj,jl) = fsd_peri_dens( a_ifsd(ji,jj,:,jl) )
-            IF( zperi_cat(ji,jj,jl) >= epsi06 ) zseff_cat(ji,jj,jl) = rpi / (zperi_cat(ji,jj,jl) * rn_floeshape)
+            zseff_cat(ji,jj,jl) = fsd_eff_size(  a_ifsd(ji,jj,:,jl) )
          ENDDO
          !
-         ! Perimeter density and effective floe size, for all ice,
-         ! calculated as area-weighted average of category versions:
-         zperi(ji,jj) = SUM( zperi_cat(ji,jj,:) * a_i(ji,jj,:) ) * zmsk1_ati(ji,jj)
-         zseff(ji,jj) = SUM( zseff_cat(ji,jj,:) * a_i(ji,jj,:) ) * zmsk1_ati(ji,jj)
+         ! Perimeter density and effective floe size, for all ice:
+         zperi(ji,jj) = fsd_peri_dens( zfsd(ji,jj,:) )
+         zseff(ji,jj) = fsd_eff_size(  zfsd(ji,jj,:) )
          !
       END_2D
 
@@ -1074,13 +1126,15 @@ CONTAINS
       !
       DO_2D(0, 0, 0, 0)
          !
+         ! Full FSTD tendency:
          zdfstd(ji,jj,:,:) = r1_Dt_ice * ( pa_ifsda(ji,jj,:,:) - pa_ifsdb(ji,jj,:,:) )
          !
+         ! Floe size distribution tendency:
+         zdfsd(ji,jj,:)    = r1_Dt_ice * (  floe_size_dist( pa_ifsda(ji,jj,:,:), pa_ia(ji,jj,:) )   &
+            &                             - floe_size_dist( pa_ifsdb(ji,jj,:,:), pa_ib(ji,jj,:) )   )
+         !
+         ! Mean floe size tendency from integrating FSD, above, which already has 1/dt factor:
          DO jf = 1, nn_nfsd
-            zdfsd(ji,jj,jf) = r1_Dt_ice * (  SUM(pa_ifsda(ji,jj,jf,:) * pa_ia(ji,jj,:))   &
-               &                           - SUM(pa_ifsdb(ji,jj,jf,:) * pa_ib(ji,jj,:))   )
-            !
-            ! mean floe size from integrating FSD, above, which already has 1/dt factor:
             zdsavg(ji,jj) = zdsavg(ji,jj) + floe_sc(jf) * zdfsd(ji,jj,jf)
          ENDDO
          !

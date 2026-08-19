@@ -189,7 +189,7 @@ CONTAINS
             a_i(ji,jj,jl_cat) = a_i(ji,jj,jl_cat) - zda
             
             ! update floe size distribution
-            IF( ln_fsd ) CALL ice_fsd_thd( a_ifsd(ji,jj,:,jl_cat), -zwlat )
+            IF( ln_fsd ) CALL ice_fsd_thd( a_ifsd(ji,jj,:,jl_cat), -rpi * zwlat / (2._wp * rn_floeshape) )
 
             ! ensure that h_i = 0 where a_i = 0
             IF( a_i(ji,jj,jl_cat) == 0._wp ) THEN

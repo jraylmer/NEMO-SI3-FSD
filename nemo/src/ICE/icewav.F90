@@ -33,7 +33,7 @@ MODULE icewav
    USE sbcwave           ! SBC wave variables
    USE ice               ! sea-ice: variables
    USE icefsd , ONLY :   a_ifsd, nf_newice, floe_sl, floe_sc, floe_su, floe_ds   ! floe size distribution parameters/variables
-   USE icefsd , ONLY :   ice_fsd_timestep, ice_fsd_cor, ice_fsd_dia              ! floe size distribution routines
+   USE icefsd , ONLY :   ice_fsd_tstep, ice_fsd_cor, ice_fsd_dia                 ! floe size distribution routines
 
    USE in_out_manager    ! I/O manager (needed for lwm and lwp logicals)
    USE iom               ! I/O manager library (needed for iom_put)
@@ -689,11 +689,11 @@ CONTAINS
       !!
       !!                3.   Evolve the FSD using adaptive time stepping (Horvat and Tziperman, 2017).
       !!                     Additional time-step restrictions apply when evolving f(s), so a smaller step
-      !!                     is (possibly) required, calculated in subroutine ice_fsd_timestep in module icefsd.
+      !!                     is (possibly) required, calculated in subroutine ice_fsd_tstep in module icefsd.
       !!
       !! ** Callers :   ice_stp -> [ice_wav_frac]
       !! ** Calls   :              [ice_wav_frac] -> wav_frac_{z16,y24a,y24b,ht15}
-      !!                           [ice_wav_frac] -> ice_fsd_timestep
+      !!                           [ice_wav_frac] -> ice_fsd_tstep
       !!                           [ice_wav_frac] -> wav_spec_bret()   (ln_ice_wav_spec = F AND ln_ice_wav_attn = F)
       !!
       !! ** Notes   :   ** On the computation of Bfrac and Qfrac for new fracture schemes
@@ -854,7 +854,7 @@ CONTAINS
                         WHERE( ABS(za_ifsd_tend) < epsi10 ) za_ifsd_tend = 0._wp
                         !
                         ! Compute adaptive timestep to increment FSD in each floe size category:
-                        CALL ice_fsd_timestep( 'ice_wav_frac', a_ifsd(ji,jj,:,jl), za_ifsd_tend(:), zdt_sub )
+                        CALL ice_fsd_tstep( 'ice_wav_frac', a_ifsd(ji,jj,:,jl), za_ifsd_tend(:), zdt_sub )
 
                         ! Make sure to not overshoot actual timestep:
                         zdt_sub = MIN(zdt_sub, rDt_ice - ztelapsed)

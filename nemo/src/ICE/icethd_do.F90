@@ -24,9 +24,8 @@ MODULE icethd_do
    USE icectl         ! sea-ice: conservation
    USE icevar  , ONLY : ice_var_vremap
    USE icethd_sal     ! sea-ice: salinity profiles
-   USE icefsd  , ONLY : ice_fsd_partition_newice, ice_fsd_add_newice,   &
-      &                 ice_fsd_thd_evolve      , ice_fsd_welding   ,   &
-      &                 ice_fsd_dia             , a_ifsd, nf_newice
+   USE icefsd  , ONLY : ice_fsd_part_newice, ice_fsd_add_newice, ice_fsd_thd, ice_fsd_weld, ice_fsd_dia
+   USE icefsd  , ONLY : a_ifsd, nf_newice
    USE icewav  , ONLY : ice_wav_newice
    USE in_out_manager ! I/O manager
    USE lib_mpp        ! MPP library
@@ -199,9 +198,9 @@ CONTAINS
                ! --- Heat content of new ice --- !
                ! We assume that new ice is formed at the seawater freezing point
                ztmelts   = - rTmlt * zs_newice(ji,jj)                  ! Melting point (C)
-               ze_newice =   rhoi * (  rcpi  * ( ztmelts - ( t_bo(ji,jj) - rt0 ) )                     &
-                  &                  + rLfus * ( 1.0 - ztmelts / MIN( t_bo(ji,jj) - rt0, -epsi10 ) )   &
-                  &                  - rcp   *         ztmelts )
+               ze_newice =   rhoi * (  rcpi  * ( ztmelts - ( t_bo(ji,jj) - rt0 ) )                               &
+                  &                  + rLfus * MAX( 0._wp, 1._wp - ztmelts / MIN( t_bo(ji,jj) - rt0, -epsi10 ) ) & ! clem: max to deal with different eq. freezing in ice and ocean (but useless for now)
+                  &                  - rcp   * ztmelts )
             
                ! --- Age of new ice --- !
                zo_newice = 0._wp
@@ -210,12 +209,12 @@ CONTAINS
                zEi           = - ze_newice * r1_rhoi                  ! specific enthalpy of forming ice [J/kg]
 
                zEw           = rcp * ( t_bo(ji,jj) - rt0 )            ! specific enthalpy of seawater at t_bo [J/kg]
-                                                                   ! clem: we suppose we are already at the freezing point (condition qlead<0 is satisfyied) 
+                                                                      ! clem: we suppose we are already at the freezing point (condition qlead<0 is satisfyied) 
                                                                    
-               zdE           = zEi - zEw                              ! specific enthalpy difference [J/kg]
+               zdE           = zEi - zEw                              ! specific enthalpy difference [J/kg] (<0)
                                               
                zfmdt         = - qlead(ji,jj) / zdE                   ! Fm.dt [kg/m2] (<0) 
-                                                                   ! clem: we use qlead instead of zqld (icethd) because we suppose we are at the freezing point   
+                                                                      ! clem: we use qlead instead of zqld (icethd) because we suppose we are at the freezing point   
                zv_newice     = - zfmdt * r1_rhoi
 
                zQm           = zfmdt * zEw                            ! heat to the ocean >0 associated with mass flux  
@@ -237,7 +236,7 @@ CONTAINS
                   ! assigned to zv_latgro, zv_newice is updated accordingly, then
                   ! the latter is treated as usual regardless of ln_fsd:
                   !
-                  CALL ice_fsd_partition_newice( za_b(:), zv_b(:), a_ifsd(ji,jj,:,:), zv_newice, zv_latgro, zda_latgro )
+                  CALL ice_fsd_part_newice( za_b(:), zv_b(:), a_ifsd(ji,jj,:,:), zv_newice, zv_latgro, zda_latgro )
                   !
                ELSE
                   zv_latgro     = 0._wp
@@ -304,7 +303,7 @@ CONTAINS
                      ENDIF
                      !
                      ! Update FSD due to lateral growth:
-                     CALL ice_fsd_thd_evolve( a_ifsd(ji,jj,:,jl), zv_latgro / rDt_ice )
+                     CALL ice_fsd_thd( a_ifsd(ji,jj,:,jl), zv_latgro / rDt_ice )
                      !
                   ENDIF
                   !
@@ -410,7 +409,7 @@ CONTAINS
                   IF( nn_icesal == 4 )   CALL ice_var_vremap( zh_i_old, zs_i_old, szv_i(ji,jj,:,jl) ) 
 
                   ! --- Floe welding (only changes FSD) --- !
-                  IF( ln_fsd ) CALL ice_fsd_welding( a_ifsd(ji,jj,:,jl), a_i(ji,jj,jl) )
+                  IF( ln_fsd ) CALL ice_fsd_weld( a_ifsd(ji,jj,:,jl), a_i(ji,jj,jl) )
                   !
                END DO
             ENDIF ! qlead < 0   

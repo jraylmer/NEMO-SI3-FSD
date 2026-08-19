@@ -29,10 +29,6 @@ MODULE icefsd
       !!----------------------------------------------------------------------
       !! ** Purpose :   Generic interface for applying numerical corrections and
       !!                renormalisation for the floe size distribution (FSD)
-      !!
-      !! ** Method  :   Remove tiny and/or negative values and renormalise FSD
-      !!                variable such that it sums to 1.
-      !!
       !!----------------------------------------------------------------------
       MODULE PROCEDURE fsd_cor_1d   ! e.g., a_ifsd(ji,jj,:,jl)
       MODULE PROCEDURE fsd_cor_2d   ! e.g., a_ifsd(ji,jj,:,:)
@@ -44,11 +40,11 @@ MODULE icefsd
    PUBLIC ::   ice_fsd_wri                ! routine called by ice_stp
    PUBLIC ::   ice_fsd_dia                ! routine called by various routines
    PUBLIC ::   ice_fsd_brit               ! routine called by ice_dyn
-   PUBLIC ::   ice_fsd_partition_newice   ! routine called by ice_thd_do
+   PUBLIC ::   ice_fsd_part_newice        ! routine called by ice_thd_do
    PUBLIC ::   ice_fsd_add_newice         ! routine called by ice_thd_do
-   PUBLIC ::   ice_fsd_welding            ! routine called by ice_thd_do
-   PUBLIC ::   ice_fsd_thd_evolve         ! routine called by ice_thd_d{a,o}
-   PUBLIC ::   ice_fsd_timestep           ! routine called by ice_wav_frac
+   PUBLIC ::   ice_fsd_weld               ! routine called by ice_thd_do
+   PUBLIC ::   ice_fsd_thd                ! routine called by ice_thd_d{a,o}
+   PUBLIC ::   ice_fsd_tstep              ! routine called by ice_wav_frac
    PUBLIC ::   fsd_eff_size               ! function called by ice_frm
    PUBLIC ::   floe_size_dist             ! function called by ice_frm
    PUBLIC ::   fsd_peri_dens              ! function called by ice_thd_da
@@ -193,73 +189,59 @@ CONTAINS
    END FUNCTION fsd_eff_size
 
 
-   SUBROUTINE fsd_cor_1d( pfsd )
+   SUBROUTINE fsd_cor_1d( pa_ifsd_jl )
       !!-------------------------------------------------------------------
       !!                   ***  ROUTINE fsd_cor_1d  ***
-      !!
-      !! ** Purpose :   Remove small/negative values and re-normalise floe size distribution
-      !! ** Input   :   FSD for one grid cell and one thickness category
-      !!
+      !! ** Purpose :   Remove small/negative values and re-normalise mFSTD
+      !! ** Input   :   a_ifsd(ji,jj,:,jl) (i.e., at one grid cell and one thickness category)
+      !!-------------------------------------------------------------------
+      REAL(wp), DIMENSION(nn_nfsd), INTENT(inout) ::   pa_ifsd_jl   ! mFSTD (one grid cell, one ITD cat.)
+      REAL(wp)                                    ::   ztotfrac     ! for normalisation
+      INTEGER                                     ::   jf           ! dummy loop index
       !!-------------------------------------------------------------------
       !
-      REAL(wp), DIMENSION(nn_nfsd), INTENT(inout) ::   pfsd   ! FSD (one grid cell, one ITD cat.)
+      ! Remove negative and/or very small values in each floe size category:
+      WHERE( pa_ifsd_jl <= epsi10 )   pa_ifsd_jl = 0._wp
       !
-      REAL(wp) ::   ztotfrac   ! for normalisation
-      INTEGER  ::   jf         ! dummy loop index
-      !
-      !!-------------------------------------------------------------------
-
-      ! Remove negative and/or very small values in each FSD category:
-      WHERE( pfsd <= epsi10 )   pfsd = 0._wp
-
-      ztotfrac = SUM(pfsd(:))   ! should = 1 when properly normalised
-
+      ztotfrac = SUM(pa_ifsd_jl(:))   ! should = 1 when properly normalised
       IF(ztotfrac > epsi10) THEN
          DO jf = 1, nn_nfsd
-            pfsd(jf) = pfsd(jf) / ztotfrac   ! ensure normalisation
+            pa_ifsd_jl(jf) = pa_ifsd_jl(jf) / ztotfrac   ! re-normalise
          ENDDO
       ELSE
-         pfsd(:) = 0._wp   ! => ice-free grid cell, set to exactly 0
+         pa_ifsd_jl(:) = 0._wp   ! => ice-free grid cell, set to exactly 0
       ENDIF
-
+      !
    END SUBROUTINE fsd_cor_1d
 
 
-   SUBROUTINE fsd_cor_2d( pfsd )
+   SUBROUTINE fsd_cor_2d( pa_ifsd )
       !!-------------------------------------------------------------------
       !!                 ***  ROUTINE fsd_cor_2d  ***
-      !!
-      !! ** Purpose :   Remove small/negative values and re-normalise floe size distribution
-      !! ** Input   :   2-D array, a_ifsd(nn_nfsd,jpl) at one grid cell
-      !!
+      !! ** Purpose :   Remove small/negative values and re-normalise mFSTD
+      !! ** Input   :   a_ifsd(ji,jj,:,:) (i.e., at one grid cell)
       !!-------------------------------------------------------------------
-      !
-      REAL(wp), DIMENSION(nn_nfsd,jpl), INTENT(inout) ::   pfsd   ! FSD, all thickness cats.
-      INTEGER                                         ::   jl     ! dummy loop index
-      !
+      REAL(wp), DIMENSION(nn_nfsd,jpl), INTENT(inout) ::   pa_ifsd   ! mFSTD (one grid cell, all ITD cats.)
+      INTEGER                                         ::   jl        ! dummy loop index
       !!-------------------------------------------------------------------
       DO jl = 1, jpl
-         CALL fsd_cor_1d( pfsd(:,jl) )
+         CALL fsd_cor_1d( pa_ifsd(:,jl) )
       ENDDO
    END SUBROUTINE fsd_cor_2d
 
 
-   SUBROUTINE fsd_cor_4d( pfsd )
+   SUBROUTINE fsd_cor_4d( pa_ifsd )
       !!-------------------------------------------------------------------
       !!                 ***  ROUTINE fsd_cor_4d  ***
-      !!
-      !! ** Purpose :   Remove small/negative values and re-normalise floe size distribution
-      !! ** Input   :   4-D array, a_ifsd(jpi,jpj,nn_nfsd,jpl) at all grid cells
-      !!
+      !! ** Purpose :   Remove small/negative values and re-normalise mFSTD
+      !! ** Input   :   a_ifsd(:,:,:,:) (i.e., full prognostic mFSTD array a_ifsd)
       !!-------------------------------------------------------------------
-      !
-      REAL(wp), DIMENSION(jpi,jpj,nn_nfsd,jpl), INTENT(inout) ::   pfsd         ! FSD, all thickness cats., all grid cells
+      REAL(wp), DIMENSION(jpi,jpj,nn_nfsd,jpl), INTENT(inout) ::   pa_ifsd      ! Full mFSTD (a_ifsd) array
       INTEGER                                                 ::   ji, jj, jl   ! dummy loop indices
-      !
       !!-------------------------------------------------------------------
       DO jl = 1, jpl
          DO_2D(0, 0, 0, 0)
-            CALL fsd_cor_1d( pfsd(ji,jj,:,jl) )
+            CALL fsd_cor_1d( pa_ifsd(ji,jj,:,jl) )
          END_2D
       ENDDO
    END SUBROUTINE fsd_cor_4d
@@ -339,9 +321,9 @@ CONTAINS
    END SUBROUTINE ice_fsd_brit
 
 
-   SUBROUTINE ice_fsd_partition_newice( pa_i, pv_i, pa_ifstd, pv_newice, pv_latgro, pda_latgro )
+   SUBROUTINE ice_fsd_part_newice( pa_i, pv_i, pa_ifstd, pv_newice, pv_latgro, pda_latgro )
       !!-------------------------------------------------------------------
-      !!            ***  ROUTINE ice_fsd_partition_newice  ***
+      !!            ***  ROUTINE ice_fsd_part_newice  ***
       !!
       !! ** Purpose :   Partition total new ice volume into new ice formation
       !!                in open water and lateral growth of existing ice
@@ -399,8 +381,7 @@ CONTAINS
       !!
       !! ** Note    :   no updates to ice concentration, volume, or FSD
       !!                prognostic variables are made in this routine. That is
-      !!                done in the routines: ice_thd_do, ice_fsd_thd_evolve,
-      !!                and ice_fsd_add_newice.
+      !!                done in the routines: ice_thd_do, ice_fsd_thd, and ice_fsd_add_newice.
       !!
       !! ** References
       !!    ----------
@@ -490,7 +471,7 @@ CONTAINS
       ! --- Update volume of new ice to grow in open water:
       pv_newice = pv_newice - pv_latgro
 
-   END SUBROUTINE ice_fsd_partition_newice
+   END SUBROUTINE ice_fsd_part_newice
 
 
    SUBROUTINE ice_fsd_add_newice( pa_ifsd, pa_newice, pa_i_before, kcat )
@@ -574,9 +555,9 @@ CONTAINS
    END SUBROUTINE ice_fsd_add_newice
 
 
-   SUBROUTINE ice_fsd_welding( pa_ifsd, pa_i )
+   SUBROUTINE ice_fsd_weld( pa_ifsd, pa_i )
       !!-------------------------------------------------------------------
-      !!                ***  ROUTINE ice_fsd_welding  ***
+      !!                  ***  ROUTINE ice_fsd_weld  ***
       !!
       !! ** Purpose :   Evolve the floe size distribution subject to the
       !!                welding together of floes in freezing conditions
@@ -706,7 +687,7 @@ CONTAINS
 
             ! --- Compute adaptive timestep to increment FSD at net rate in
             !     each floe size category (gain - loss):
-            CALL ice_fsd_timestep( 'ice_fsd_welding', pa_ifsd(:), zgain(:) - zloss(:), zdt_sub )
+            CALL ice_fsd_tstep( 'ice_fsd_weld', pa_ifsd(:), zgain(:) - zloss(:), zdt_sub )
 
             ! Make sure to not overshoot actual timestep:
             zdt_sub = MIN(zdt_sub, rDt_ice - ztelapsed)
@@ -724,7 +705,7 @@ CONTAINS
             IF( pa_ifsd(nn_nfsd) > (1._wp - epsi10)) EXIT
 
             IF( isubt == isubt_max ) THEN
-               CALL ctl_warn('ice_fsd_welding not converging: ',            &
+               CALL ctl_warn('ice_fsd_weld not converging: ',            &
                   &          'reached maximum number of adaptive time steps')
             ENDIF
 
@@ -734,12 +715,12 @@ CONTAINS
 
       ENDIF
 
-   END SUBROUTINE ice_fsd_welding
+   END SUBROUTINE ice_fsd_weld
 
 
-   SUBROUTINE ice_fsd_thd_evolve( pa_ifsd, pG_s )
+   SUBROUTINE ice_fsd_thd( pa_ifsd, pG_s )
       !!-------------------------------------------------------------------
-      !!               ***  ROUTINE ice_fsd_thd_evolve  ***
+      !!                  ***  ROUTINE ice_fsd_thd  ***
       !!
       !! ** Purpose :   Evolve the floe size distribution subject to lateral
       !!                growth/melt
@@ -759,7 +740,7 @@ CONTAINS
       !!                it forwards (for one thickness category) by one model
       !!                time step using adaptive time stepping (Horvat and
       !!                Tziperman, 2017). The adaptive time step is calculated
-      !!                in routine ice_fsd_timestep.
+      !!                in routine ice_fsd_tstep.
       !!
       !! ** Input   :   pa_ifsd(nn_nfsd) : floe size distribution at one grid
       !!                                   point and for one thickness category
@@ -890,7 +871,7 @@ CONTAINS
          ENDDO
 
          ! --- Compute adaptive timestep to increment FSD at this rate
-         CALL ice_fsd_timestep( 'ice_thd_d'//cln//' -> ice_fsd_thd_evolve',   &
+         CALL ice_fsd_tstep( 'ice_thd_d'//cln//' -> ice_fsd_thd',   &
             &                   pa_ifsd(:), za_ifsd_tend(:), zdt_sub )
 
          ! Make sure we do not overshoot actual time step:
@@ -902,7 +883,7 @@ CONTAINS
          isubt      = isubt + 1
 
          IF( isubt == isubt_max ) THEN
-            CALL ctl_warn('ice_thd_d'//cln//' -> ice_fsd_thd_evolve not converging: ',   &
+            CALL ctl_warn('ice_thd_d'//cln//' -> ice_fsd_thd not converging: ',   &
                &          ' reached maximum number of adaptive time steps')
          ENDIF
 
@@ -910,12 +891,12 @@ CONTAINS
 
       CALL ice_fsd_cor( pa_ifsd(:) )   ! small/negative value corrections, re-normalisation
 
-   END SUBROUTINE ice_fsd_thd_evolve
+   END SUBROUTINE ice_fsd_thd
 
 
-   SUBROUTINE ice_fsd_timestep( cdcrn, pa_ifsd_init, pa_ifsd_tend, pDt )
+   SUBROUTINE ice_fsd_tstep( cdcrn, pa_ifsd_init, pa_ifsd_tend, pDt )
       !!-------------------------------------------------------------------
-      !!                   *** ROUTINE ice_fsd_timestep ***
+      !!                    *** ROUTINE ice_fsd_tstep ***
       !!
       !! ** Purpose :   Calculate adaptive time step for evolving the floe
       !!                size distribution subject to lateral growth/melt
@@ -973,7 +954,7 @@ CONTAINS
          &  '   FSD tendency has become unstable during routine: '//TRIM(cdcrn),   &
          &  '   (suggestion: reducing width of floe size categories may overcome the issue)')
 
-   END SUBROUTINE ice_fsd_timestep
+   END SUBROUTINE ice_fsd_tstep
 
 
    SUBROUTINE ice_fsd_wri( kt )

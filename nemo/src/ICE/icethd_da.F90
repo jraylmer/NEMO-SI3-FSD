@@ -19,7 +19,7 @@ MODULE icethd_da
    USE phycst  , ONLY : rpi, rt0, rhoi, rhos
    USE sbc_oce, ONLY: sst_m
    USE ice
-   USE icefsd  , ONLY : fsd_peri_dens, ice_fsd_thd_evolve, a_ifsd, floe_ds
+   USE icefsd  , ONLY : fsd_peri_dens, ice_fsd_thd, a_ifsd, floe_ds
    !
    USE in_out_manager , ONLY : numnam_ice_ref, numnam_ice_cfg, numout, numoni, lwp, lwm  ! I/O manager
    USE lib_mpp        , ONLY : ctl_stop, ctl_warn, ctl_nam                               ! MPP library
@@ -189,7 +189,7 @@ CONTAINS
             a_i(ji,jj,jl_cat) = a_i(ji,jj,jl_cat) - zda
             
             ! update floe size distribution
-            IF( ln_fsd ) CALL ice_fsd_thd_evolve( a_ifsd(ji,jj,:,jl_cat), -zwlat )
+            IF( ln_fsd ) CALL ice_fsd_thd( a_ifsd(ji,jj,:,jl_cat), -zwlat )
 
             ! ensure that h_i = 0 where a_i = 0
             IF( a_i(ji,jj,jl_cat) == 0._wp ) THEN

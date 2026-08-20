@@ -32,8 +32,8 @@ MODULE icewav
    USE sbc_oce, ONLY :   wndm, ln_wave, ln_wave_spec, nn_nwfreq            ! SBC module
    USE sbcwave           ! SBC wave variables
    USE ice               ! sea-ice: variables
-   USE icefsd , ONLY :   a_ifsd, nf_newice, floe_sl, floe_sc, floe_su, floe_ds   ! floe size distribution parameters/variables
-   USE icefsd , ONLY :   ice_fsd_tstep, ice_fsd_cor, ice_fsd_dia                 ! floe size distribution routines
+   USE icefsd , ONLY :   a_ifsd, nf_newice, floe_sl, floe_sc, floe_su, floe_ds     ! floe size distribution parameters/variables
+   USE icefsd , ONLY :   ice_fsd_tstep, ice_fsd_cor, ice_fsd_dia, floe_size_dist   ! floe size distribution functions/routines
 
    USE in_out_manager    ! I/O manager (needed for lwm and lwp logicals)
    USE iom               ! I/O manager library (needed for iom_put)
@@ -113,6 +113,7 @@ MODULE icewav
    REAL(wp)        ::   rn_z16_a          !: Z16 scheme dimensionless parameter 'a'
    REAL(wp)        ::   rn_z16_b          !: Z16 scheme dimensionless parameter 'b'
    REAL(wp)        ::   rn_z16_hc         !: Z16 scheme cutoff ice thickness (m)
+   INTEGER         ::   nn_z16_nf         !: Z16 scheme domain size (number of surrounding grid cells) for fetch parameter
    REAL(wp)        ::   rn_y24a_cw        !: Parameter in Y24A fracture scheme
    REAL(wp)        ::   rn_y24a_alpha     !: Parameter in Y24A fracture scheme
    INTEGER         ::   nn_ht15_nx1d      !: Size of 1D subdomain for wave fracture calculation (HT15 only)
@@ -732,9 +733,13 @@ CONTAINS
       REAL(wp)                                ::   zh_i                 ! mean ice thickness
       REAL(wp)                                ::   zfsd_res             ! correction term for area conservation
       REAL(wp)                                ::   zdt_sub              ! adaptive time step (s)
-      REAL(wp)                                ::   ztelapsed            ! to track time elapsed during adaptive time stepping (s)
-      INTEGER                                 ::   isubt                ! to track number of adaptive time steps
+      REAL(wp)                                ::   ztelapsed            ! time elapsed during adaptive time stepping (s)
+      INTEGER                                 ::   isubt                ! number of adaptive time steps used
       INTEGER                                 ::   ji, jj, jl, jf       ! dummy loop indices
+      !
+      !                                                                 ! --  Z16 scheme only -- !
+      REAL(wp)                                ::   z1mfetch, znumcell   ! for local fetch parameter calculation
+      INTEGER                                 ::   jx, jy               ! more dummy loop indices
       !
       !                                                                 ! -- HT15 scheme only -- !
       INTEGER                                 ::   zstat, znumfrac      ! to track how often convergence not reached
@@ -746,6 +751,9 @@ CONTAINS
 
       ! Control:
       IF( ln_timing )   CALL timing_start('ice_wav_frac')
+
+      z1mfetch = 0._wp   ! initialise
+      znumcell = 0._wp
 
       IF( kt == nit000 ) THEN   ! at first time-step
          ! Compute constant weight terms for Y24B fracture scheme:
@@ -783,8 +791,30 @@ CONTAINS
             SELECT CASE( nn_frac_scheme )
                CASE( jpfrac_z16  )
                   !
-                  CALL wav_frac_z16( wndm(ji,jj)      , zh_i     , a_i(ji-1:ji+1,jj-1:jj+1,:),   &
-                     &               a_ifsd(ji,jj,:,:), zQfrac(:), zBfrac(:,:) )
+                  IF( .NOT. ln_z16_const ) THEN
+                     ! Calculate 1 minus the fetch parameter for Z16 participation factor:
+                     z1mfetch = 0._wp   ! 1 - f0, where f0 = mean open water fraction
+                     znumcell = 0._wp   ! number of grid cells averaged over
+                     !
+                     ! Open water fraction is averaged over local + N surrounding grid cells
+                     ! [(2N+1)x(2N+1) grid cells, where N is namelist par. nn_z16_nf
+                     !
+                     ! We do not necessarily average over all (2N+1)^2 cells, as some may be
+                     ! land or not exist if we are close to the model domain edge
+                     DO jx = MAX(1,ji-nn_z16_nf), MIN(jpi, ji+nn_z16_nf)
+                        DO jy = MAX(1,jj-nn_z16_nf), MIN(jpj, jj+nn_z16_nf)
+                           IF( tmask(jx,jy,1) > 0._wp ) THEN   ! => not a land cell
+                              z1mfetch = z1mfetch + SUM(a_i(jx,jy,:))
+                              znumcell = znumcell + 1._wp
+                           ENDIF
+                        ENDDO
+                     ENDDO
+                     IF( znumcell > 0._wp ) z1mfetch = z1mfetch / znumcell
+                  ENDIF
+                  !
+                  CALL wav_frac_z16( wndm(ji,jj) , zh_i , z1mfetch                    ,   &
+                     &               floe_size_dist( a_ifsd(ji,jj,:,:), a_i(ji,jj,:) ),   &
+                     &               zQfrac(:)   , zBfrac(:,:)                            )
                   !
                CASE( jpfrac_y24a )
                   !
@@ -930,7 +960,7 @@ CONTAINS
    END SUBROUTINE ice_wav_frac
 
 
-   SUBROUTINE wav_frac_z16( puatm, ph_i, pa_i, pa_ifsd, pQfrac, pBfrac )
+   SUBROUTINE wav_frac_z16( puatm, ph_i, p1mfetch, pfsd, pQfrac, pBfrac )
       !!-------------------------------------------------------------------
       !!                 *** ROUTINE wav_frac_z16 ***
       !!
@@ -956,8 +986,8 @@ CONTAINS
       !!                where k, a, and b are dimensionless constants (set in namelist), hi is mean ice
       !!                thickness, hc is a cutoff thickness (namelist), f0 is open water fraction,
       !!                savg is mean floe size, smax is the largest resolved floe size, and dt is the model
-      !!                timestep. The open water fraction is calculated as an average over the grid cell
-      !!                and its eight surrounding neighbours.
+      !!                timestep. The open water fraction is calculated as an average over the
+      !!                (2N+1) x (2N+1) grid cells centred on the local grid cell (N = nn_z16_nf).
       !!
       !!                The redistribution function is determined by assuming any floe of size s'
       !!                that is undergoing wave fracture is equally likely to fracture into any
@@ -966,8 +996,8 @@ CONTAINS
       !!
       !! ** Inputs  :   puatm                   :   local wind speed (m/s)
       !!                ph_i                    :   local mean ice thickness (m)
-      !!                pa_i(3,3,jpl)           :   sea ice concentration at local and 8 neighbouring cells
-      !!                pa_ifsd(nn_nfsd,jpl)    :   local areal floe size-thickness distribution
+      !!                p1mfetch                :   1 minus local fetch parameter
+      !!                pfsd                    :   floe size distribution, f(s)ds
       !!
       !! ** Outputs :   pQfrac(nn_nfsd)         :   fracture probability function (s-1)
       !!                pBfrac(nn_nfsd,nn_nfsd) :   fracture redistribution function, B(s',s)ds
@@ -980,7 +1010,7 @@ CONTAINS
       !!                technically includes any wind-driven fracture process. In the MIZ, this is
       !!                dominantly wave mediated, but in the pack ice it is mediated by deformation
       !!                and internal stresses. So, with this scheme, there may be a need to adjust
-      !!                the brittle fracture (routine ice_fsd_bri) parameters to compensate.
+      !!                the brittle fracture (routine ice_fsd_brit) parameters to compensate.
       !!
       !! ** References
       !!    ----------
@@ -994,53 +1024,37 @@ CONTAINS
       !
       REAL(wp)                            , INTENT(in)    ::   puatm     ! local near-surface wind speed (m/s)
       REAL(wp)                            , INTENT(in)    ::   ph_i      ! local mean sea ice thickness (m)
-      REAL(wp), DIMENSION(3,3,jpl)        , INTENT(in)    ::   pa_i      ! ice concentration, local and 8 surrounding cells
-      REAL(wp), DIMENSION(nn_nfsd,jpl)    , INTENT(in)    ::   pa_ifsd   ! local floe size-thickness distribution
+      REAL(wp)                            , INTENT(in)    ::   p1mfetch  ! 1 minus fetch parameter
+      REAL(wp), DIMENSION(nn_nfsd)        , INTENT(in)    ::   pfsd      ! floe size distribution, f(s)ds
       REAL(wp), DIMENSION(nn_nfsd)        , INTENT(inout) ::   pQfrac    ! wave fracture probability function (s-1)
       REAL(wp), DIMENSION(nn_nfsd,nn_nfsd), INTENT(inout) ::   pBfrac    ! wave fracture redistribution function, B(s',s)ds
       !
-      REAL(wp), DIMENSION(nn_nfsd) ::   zfsd         ! floe size distribution, integrated over thickness
-      REAL(wp)                     ::   zsavg        ! mean floe size
-      REAL(wp)                     ::   z1minusf_0   ! 1 minus fetch parameter
-      REAL(wp)                     ::   zc_b         ! participation factor
-      INTEGER                      ::   jf           ! dummy loop index
+      REAL(wp)                                            ::   zsavg     ! mean floe size
+      REAL(wp)                                            ::   zc_b      ! participation factor
+      INTEGER                                             ::   jf, jl    ! dummy loop index
       !
       !!-------------------------------------------------------------------
-
-      ! --- Calculate floe size distribution integrated over thickness
-      !     and mean floe size (only needed if ln_z16_const = F)
-      zfsd(:) = 0._wp
-      zsavg   = 0._wp   ! initialise
-
-      ! Note: pa_i(2,2,:) is the current grid cell (other indices are surrounding 8 cells)
-      ! Hard-coding this for now; maybe in the future make number of surrounding cells
-      ! an option, then calculate this, size of input array, and averaging factor (9 below)
-      ! including checks against nn_hls (for now not needed as nn_hls >= 1):
-      DO jf = 1, nn_nfsd
-         zfsd(jf) = SUM( pa_ifsd(jf,:) * pa_i(2,2,:) )
-         zsavg    = zsavg + floe_sc(jf) * zfsd(jf)
-      ENDDO
 
       ! --- Calculate participation factor, zc_b --- !
       !
       IF( ln_z16_const ) THEN
-         ! Use constant participation factor (as in Zhang et al. 2015, Eq. 15):
-         zc_b = rn_z16_cb
-         !
+         zc_b = rn_z16_cb   ! constant participation factor (Zhang et al. 2015, Eq. 15)
       ELSE
-         ! Use variable participation factor (as in Zhang et al. 2016, Eq. 5)
+         ! Variable participation factor (as in Zhang et al. 2016, Eq. 5)
          !
-         ! Calculate 1 - f_0, where f_0 open water fraction in local + 8 surrounding grid cells
-         ! (see comment above: hard-coding the factor of 9 for now):
-         z1minusf_0 = SUM( pa_i(:,:,:) ) / 9._wp
+         ! Mean floe size:
+         zsavg = 0._wp
+         DO jf = 1, nn_nfsd
+            zsavg = zsavg + floe_sc(jf) * pfsd(jf)
+         ENDDO
          !
-         zc_b = EXP( -rn_z16_a * z1minusf_0 - rn_z16_b * (1._wp - zsavg / floe_sc(nn_nfsd)) )
+         zc_b = EXP( -rn_z16_a * p1mfetch - rn_z16_b * (1._wp - zsavg / floe_sc(nn_nfsd)) )
          zc_b = zc_b * rn_z16_k * puatm * rDt_ice / MAX( ph_i, rn_z16_hc )
       ENDIF
 
       ! --- Calculate source terms --- !
       DO jf = 1, nn_nfsd
-         pQfrac(jf) = MAX( 0._wp, 1._wp - SUM(zfsd(jf:nn_nfsd)) / zc_b ) * r1_Dt_ice
+         pQfrac(jf) = MAX( 0._wp, 1._wp - SUM(pfsd(jf:nn_nfsd)) / zc_b ) * r1_Dt_ice
       ENDDO
 
       pBfrac(:,:) = Bfrac_uni(:,:)   ! uniform redistribution
@@ -1949,7 +1963,7 @@ CONTAINS
       !!
       NAMELIST/namwav/ ln_ice_wav     , ln_ice_wav_spec, rn_ice_wav_ecri, nn_frac_scheme,   &
          &             ln_z16_const   , rn_z16_cb      , rn_z16_k       , rn_z16_a      ,   &
-         &             rn_z16_b       , rn_z16_hc      ,                                    &
+         &             rn_z16_b       , rn_z16_hc      , nn_z16_nf      ,                   &
          &             rn_y24a_cw     , rn_y24a_alpha  ,                                    &
          &             nn_ht15_nx1d   , rn_ht15_dx1d   , nn_ht15_rmin   , ln_ht15_rand  ,   &
          &             rn_ht15_tol    , nn_ht15_maxiter, ln_ht15_warn   ,                   &
@@ -1989,6 +2003,7 @@ CONTAINS
          WRITE(numout,*) '                     parameter a                               rn_z16_a = ', rn_z16_a
          WRITE(numout,*) '                     parameter b                               rn_z16_b = ', rn_z16_b
          WRITE(numout,*) '                     Cutoff ice thickness                     rn_z16_hc = ', rn_z16_hc
+         WRITE(numout,*) '                     Num. surrounding cells for fetch param.  nn_z16_nf = ', nn_z16_nf
          WRITE(numout,'(A,I0,A)') '            Yang et al. (2024) A scheme parameters (nn_frac_scheme = ', jpfrac_y24a, '):'
          WRITE(numout,*) '               Probability function parameter c_w           rn_y24a_cw      = ', rn_y24a_cw
          WRITE(numout,*) '               Probability function parameter alpha         rn_y24a_alpha   = ', rn_y24a_alpha
@@ -2088,6 +2103,11 @@ CONTAINS
 
          ! Allocate and define module constants
          !
+         ! Z16 scheme: dimension of local + surrounding domain for sea ice conc./fetch calculation:
+         IF( (nn_frac_scheme == jpfrac_z16) .AND. ( nn_z16_nf < 0 ) ) THEN
+            CALL ctl_stop('STOP', 'ice_wav_init: nn_z16_nf must be >= 0')
+         ENDIF
+
          ! If fracture scheme uses constant redistributor function, calculate it now
          ! (see Zhang et al. 2015; JGR:O for theory):
          IF( (nn_frac_scheme == jpfrac_z16) .OR. (nn_frac_scheme == jpfrac_y24a) ) THEN

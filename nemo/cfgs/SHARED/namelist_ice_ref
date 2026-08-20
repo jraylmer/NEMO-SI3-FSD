@@ -230,10 +230,10 @@
                                       !    3 = Cox and Weeks (1988)          => CW1988
                                       ! ** parameters for each scheme **
       rn_alpha_RJW  = 0.03            !    1: Intensity of the Brine flow  ==> minmax tested [0.03 ; 0.037]?
-      rn_Rc_RJW     = 9.0             !    1: Critical Rayleigh number     ==>               [2.9  ; 9]?
-      rn_alpha_GN   = 5.1e-4          !    2: Intensity of the Brine flow  ==>               [0.510e-3 ; 0.681e-3] from Griewank and Notz 2015
-      rn_Rc_GN      = 10.0            !    2: Critical Rayleigh number     ==>               [7.10 ; 3.23]         from Griewank and Notz 2015
-      rn_alpha_CW   = 4.8e-7          !    3: Intensity of the Brine flow  ==>               [4e-7 ; 7e-7]?
+      rn_Rc_RJW     = 8.0             !    1: Critical Rayleigh number     ==>               [2.9  ; 9]?
+      rn_alpha_GN   = 4.6e-4          !    2: Intensity of the Brine flow  ==>               [0.510e-3 ; 0.681e-3] from Griewank and Notz 2015
+      rn_Rc_GN      = 8.1             !    2: Critical Rayleigh number     ==>               [7.10 ; 3.23]         from Griewank and Notz 2015
+      rn_alpha_CW   = 5.0e-7          !    3: Intensity of the Brine flow  ==>               [4e-7 ; 7e-7]?
       !
    ln_sal_chk       = .FALSE.         !  sanity checks for drainage and flushing
 /
@@ -396,6 +396,8 @@
          rn_z16_a      = 1.5             !    Variable participation factor, parameter a
          rn_z16_b      = 3.5             !    Variable participation factor, parameter b
          rn_z16_hc     = 0.2             !    Variable participation factor, cutoff thickness parameter
+         nn_z16_nf     = 1               !    Number of surrounding grid cells over which to calculate open water fraction
+                                         !       for fetch parameter (>= 0; default 1 => 3x3 grid centred on current cell)
                  ! -- nn_frac_scheme=2 --!
          rn_y24a_cw    = 0.8             ! Fracture probability function tuning parameter (0 < cw <= 1)
          rn_y24a_alpha = 1.0             ! Fracture probability function tuning parameter (alpha > 0)

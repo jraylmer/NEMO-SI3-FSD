@@ -75,7 +75,8 @@ MODULE icefsd
    INTEGER  ::   nn_fsd_ini         ! FSD init. options (1 = all in largest FSD cat; 2 = imposed power law)
    REAL(wp) ::   rn_fsd_ini_alpha   ! Parameter used for power law initial FSD with nn_fsd_ini = 2 only
    REAL(wp) ::   rn_fsd_s_newice    ! Floe size of new ice in absence of wave field [m]
-   REAL(wp) ::   rn_fsd_t_restore   ! FSD restoring timescale [s]
+   REAL(wp) ::   rn_fsd_brit_grad   ! Maximum gradient of number density FSD in log-log space
+   REAL(wp) ::   rn_fsd_brit_tres   ! Restoring timescale (units: s)
    REAL(wp) ::   rn_fsd_amin_weld   ! Minimum concentration required for floe welding to take effect
    REAL(wp) ::   rn_fsd_c_weld      ! Floe welding coefficient [m-2.s-1]
 
@@ -251,21 +252,31 @@ CONTAINS
       !!-------------------------------------------------------------------
       !!                 ***  ROUTINE ice_fsd_brit  ***
       !!
-      !! ** Purpose :   In-plane (brittle) fracture of sea ice.
+      !! ** Purpose :   In-plane (brittle) fracture of sea ice
       !!
-      !! ** Method  :   Wherever the FSD f(s) satisfies:
+      !! ** Method  :   Quasi-restoring of the number density floe size distribution (NDFSD)
+      !!                towards a theoretical gradient in log(floe size)--log(NDFSD) space whenever
+      !!                the actual NDFSD locally exceeds that gradient.
       !!
-      !!                (log(f(s+1)) - log(f(s))) / (log(s+1) - log(s)) > 0,
+      !!                The NDFSD is related to the prognostic 'modified-areal' floe size-thickness
+      !!                distribution (mFSTD, L(s,h); variable: a_ifsd) for each ice thickness
+      !!                category by division of the latter by floe area, which is proportional to
+      !!                floe size squared. Thus, the maximum allowed gradient in log-log space of
+      !!                the mFSTD is that of the NDFSD plus 2 (see external docs).
       !!
-      !!                shift area fraction of floes in s+1 category into s
-      !!                category at a rate with a restoring time scale
-      !!                rn_fsd_t_restore (set in namelist).
+      !!                When restoring is needed, based on the above condition estimated between
+      !!                floe size categories j and j-1 using a backward-in-space finite difference,
+      !!                area fraction from category j is transferred into category j-1 following a
+      !!                (quasi-)exponential decay:
       !!
-      !!                The right hand side corresponds to a power law
-      !!                distribution in number-density FSD space with exponent
-      !!                -2 (transforming to area FSD space yields an extra
-      !!                factor of two which cancels). See Bateson et al. (2022)
-      !!                for theory.
+      !!                   d(ln L)/d(ln s)|_j = -L_j / t_res
+      !!
+      !!                where t_res is a restoring timescale (namelist rn_fsd_brit_tres) and the
+      !!                same tendency (right-hand side) is applied to category j-1 with opposite
+      !!                sign. Such tendency contributions are summed to give the net tendency in
+      !!                each category and evolved using adaptive time stepping (see ice_fsd_tstep).
+      !!
+      !!                See docs and Bateson et al. (2022) for theory/motivation.
       !!
       !! ** References
       !!    ----------
@@ -274,44 +285,98 @@ CONTAINS
       !!              The Cryosphere, 16, 2565-2593.
       !!-------------------------------------------------------------------
       !
-      REAL(wp), PARAMETER ::   zlogfsd_grad_target = 0._wp            ! log(FSD) gradient to restore toward
-      !
-      REAL(wp), DIMENSION(A2D(0),nn_nfsd,jpl) ::   zfstd_b           ! FSTD before restoring (for tendency diagnostic)
-      REAL(wp)                                ::   zlogfsd_grad      ! FSD forward-in-space gradient in log space
+      REAL(wp), DIMENSION(A2D(0),nn_nfsd,jpl) ::   zfstd_b           ! FSTD before brittle fracture (for diagnostics)
+      REAL(wp), DIMENSION(nn_nfsd)            ::   ztendency         ! tendency of FSTD
+      REAL(wp), DIMENSION(nn_nfsd)            ::   zloss, zgain      ! loss and gain terms to compute tendency
+      REAL(wp)                                ::   zlogfsd_grad      ! forward-in-space gradient of FSD in log-log space
+      REAL(wp)                                ::   ztelapsed         ! time elapsed during adaptive time stepping (units: s)
+      REAL(wp)                                ::   zdt_sub           ! adaptive time step (units: s)
+      REAL(wp)                                ::   zfsd_res          ! correction term for area conservation
+      INTEGER                                 ::   isubt             ! number of adaptive time steps taken
       INTEGER                                 ::   ji, jj, jl, jf    ! dummy loop indices
+      !
+      INTEGER, PARAMETER :: isubt_max = 100   ! number of iterations at which warning raised
       !
       !!-------------------------------------------------------------------
 
-      zfstd_b(A2D(0),:,:) = a_ifsd(A2D(0),:,:)   ! FSTD before restoring (for diagnostic)
+      zfstd_b(A2D(0),:,:) = a_ifsd(A2D(0),:,:)   ! FSTD before brittle fracture (for diagnostics)
 
       DO jl = 1, jpl
          DO_2D( 0, 0, 0, 0 )
-            !
-            IF( (a_i(ji,jj,jl) > epsi10) .and. (ALL(a_ifsd(ji,jj,:,jl) > epsi10)) ) THEN
-               DO jf = 1, nn_nfsd-1
-                  !
-                  ! --- Calculate forward-in-space gradient in log-space
-                  !
-                  zlogfsd_grad = ( LOG(a_ifsd(ji,jj,jf+1,jl)) - LOG(a_ifsd(ji,jj,jf,jl)) )   &
-                     &           / floe_dlog_sc(jf)
-                  !
-                  ! --- If gradient is too large, break up some larger floes into
-                  !     smaller floes [transfer area from larger to smaller category;
-                  !     note fraction added to smaller category = that removed from
-                  !     larger category (done afterwards)]
-                  !
-                  IF ( zlogfsd_grad > zlogfsd_grad_target ) THEN
+            IF( (a_i(ji,jj,jl) > epsi10) .AND. (ALL(a_ifsd(ji,jj,:,jl) > epsi10)) ) THEN
+
+               ! Start adaptive time stepping:
+               ztelapsed = 0._wp
+               isubt     = 0
+               !
+               DO WHILE (ztelapsed < rDt_ice)
+
+                  zloss(:) = 0._wp  ! initialise or reset
+                  zgain(:) = 0._wp
+
+                  DO jf = 2, nn_nfsd
+                     ! Backward-in-(log)-space gradient (denominator pre-computed in fsd_initbounds):
+                     zlogfsd_grad = ( LOG(a_ifsd(ji,jj,jf,jl)) - LOG(a_ifsd(ji,jj,jf-1,jl)) )   &
+                        &           / floe_dlog_sc(jf)
                      !
-                     a_ifsd(ji,jj,jf,  jl) = a_ifsd(ji,jj,jf,jl) + rDt_ice * a_ifsd(ji,jj,jf+1,jl) / rn_fsd_t_restore
-                     a_ifsd(ji,jj,jf+1,jl) = a_ifsd(ji,jj,jf+1,jl) * (1._wp - rDt_ice / rn_fsd_t_restore)
+                     ! If gradient is too large here, restore toward maximum allowed gradient by
+                     ! transferring area fraction to the smaller category as exponential decay
                      !
+                     ! Offset of 2 is to transform from area-density FSD (a_ifsd)
+                     !                             to number-density FSD (gradient rn_fsd_brit_grad)
+                     IF ( zlogfsd_grad > rn_fsd_brit_grad + 2._wp ) THEN
+                        zloss(jf)   = zloss(jf)   + a_ifsd(ji,jj,jf,jl)   ! divide by timescale after
+                        zgain(jf-1) = zgain(jf-1) + a_ifsd(ji,jj,jf,jl)
+                     ENDIF
+                  ENDDO
+
+                  ! Net tendency per category:
+                  ztendency(:) = (zgain(:) - zloss(:)) / rn_fsd_brit_tres
+
+                  ! Compute adaptive timestep:
+                  CALL ice_fsd_tstep( 'ice_fsd_brit', a_ifsd(ji,jj,:,jl), ztendency(:), zdt_sub )
+
+                  ! Make sure to not overshoot actual timestep:
+                  zdt_sub = MIN(zdt_sub, rDt_ice - ztelapsed)
+
+                  ! Update FSD and time elapsed:
+                  a_ifsd(ji,jj,:,jl) = a_ifsd(ji,jj,:,jl) + zdt_sub * ztendency(:)
+                  ztelapsed          = ztelapsed + zdt_sub
+                  isubt              = isubt + 1
+
+                  ! Break adaptive time stepping loop if all ice now in smallest category
+                  ! (=> all possible fracture occurred):
+                  IF( a_ifsd(ji,jj,1,jl) > (1._wp - epsi10)) EXIT
+
+                  IF( isubt == isubt_max ) THEN
+                     CALL ctl_warn('ice_fsd_brit not converging: ',               &
+                        &          'reached maximum number of adaptive time steps')
                   ENDIF
-                  !
+
                ENDDO
+
+               ! Brittle fracture physically cannot/should not directly lead to loss of ice area
+               ! So, correct for any numerical residual by adding it back to the smallest floe size
+               ! category (if some area is lost) or by taking it away from the largest category
+               ! that has at least that residual available (if some area has been gained).
+               !
+               zfsd_res = SUM(a_ifsd(ji,jj,:,jl)) - 1._wp
+               !
+               IF( zfsd_res <= 0._wp ) THEN   ! area lost
+                  a_ifsd(ji,jj,1,jl) = a_ifsd(ji,jj,1,jl) + ABS(zfsd_res)
+               ELSE   ! area gained
+                  DO jf = nn_nfsd, 1, -1
+                     IF( a_ifsd(ji,jj,jf,jl) > zfsd_res) THEN
+                        a_ifsd(ji,jj,jf,jl) = a_ifsd(ji,jj,jf,jl) - zfsd_res
+                        EXIT
+                     ENDIF
+                  ENDDO
+               ENDIF
+               !
+               ! Now ensure normalisation and [0-1] bounding:
+               CALL ice_fsd_cor( a_ifsd(ji,jj,:,jl) )
+               !
             ENDIF
-            !
-            CALL ice_fsd_cor( a_ifsd(ji,jj,:,jl) )   ! small/negative value corrections, re-normalisation
-            !
          END_2D
       ENDDO
 
@@ -1198,7 +1263,7 @@ CONTAINS
 
       ALLOCATE(floe_sl(nn_nfsd), floe_sc(nn_nfsd), floe_su(nn_nfsd), floe_ds(nn_nfsd),   &
          &     floe_al(nn_nfsd), floe_ac(nn_nfsd), floe_au(nn_nfsd),                     &
-         &     floe_dlog_sc(nn_nfsd-1), floe_iweld(nn_nfsd, nn_nfsd), STAT=ierr)
+         &     floe_dlog_sc(nn_nfsd), floe_iweld(nn_nfsd, nn_nfsd), STAT=ierr)
 
       IF (ierr /= 0) CALL ctl_stop('fsd_init_bounds: could not allocate FSD size/area arrays')
 
@@ -1343,8 +1408,8 @@ CONTAINS
       !
       floe_dlog_sc(:) = 0._wp   ! initialise
       !
-      DO jf1 = 1, nn_nfsd-1
-         floe_dlog_sc(jf1) = LOG(floe_sc(jf1+1)) - LOG(floe_sc(jf1))
+      DO jf1 = 2, nn_nfsd
+         floe_dlog_sc(jf1) = LOG(floe_sc(jf1)) - LOG(floe_sc(jf1-1))
       ENDDO
 
    END SUBROUTINE fsd_initbounds
@@ -1479,7 +1544,8 @@ CONTAINS
       !!
       NAMELIST/namfsd/ ln_fsd          , nn_fsd_catini   , nn_nfsd        , rn_fsd_smin     ,   &
          &             rn_fsd_smax     , rn_fsd_spc      , rn_fsd_catbnd  , rn_floeshape    ,   &
-         &             nn_fsd_ini      , rn_fsd_ini_alpha, rn_fsd_s_newice, rn_fsd_t_restore,   &
+         &             nn_fsd_ini      , rn_fsd_ini_alpha, rn_fsd_s_newice                  ,   &
+         &             ln_fsd_brit     , rn_fsd_brit_grad, rn_fsd_brit_tres                 ,   &
          &             rn_fsd_amin_weld, rn_fsd_c_weld
       !!-------------------------------------------------------------------
       !
@@ -1504,7 +1570,9 @@ CONTAINS
          WRITE(numout,*) '         Floe size of new ice (in absence of waves)    rn_fsd_s_newice  = ', rn_fsd_s_newice
          WRITE(numout,*) '         Floe welding minimum sea ice concentration    rn_fsd_amin_weld = ', rn_fsd_amin_weld
          WRITE(numout,*) '         Floe welding coefficient                         rn_fsd_c_weld = ', rn_fsd_c_weld
-         WRITE(numout,*) '         FSD restoring (brittle fracture) time scale   rn_fsd_t_restore = ', rn_fsd_t_restore
+         WRITE(numout,*) '         Activate brittle fracture scheme or not            ln_fsd_brit = ', ln_fsd_brit
+         WRITE(numout,*) '            Max. gradient of number-density FSD        rn_fsd_brit_grad = ', rn_fsd_brit_grad
+         WRITE(numout,*) '            Restoring time scale                       rn_fsd_brit_tres = ', rn_fsd_brit_tres
          WRITE(numout,*) ''
       ENDIF
 
@@ -1518,6 +1586,9 @@ CONTAINS
 
          CALL fsd_initbounds
 
+      ELSE
+         ! Set FSD-related logicals to false to avoid issues:
+         ln_fsd_brit = .FALSE.
       ENDIF
 
    END SUBROUTINE ice_fsd_init

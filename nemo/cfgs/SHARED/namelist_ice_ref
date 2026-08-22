@@ -361,8 +361,9 @@
      rn_fsd_amin_weld = 0.1             ! Minimum sea ice concentration for floe welding in freezing conditions
      rn_fsd_c_weld    = 1.e-08          ! Floe welding coefficient (m-2 s-1)
                    ! --  fracturing  -- !
-     rn_fsd_t_restore = 2.592e6         ! Restoring time scale (brittle fracture; s)
-                                        ! default = 30 days
+     ln_fsd_brit      = .true.          ! Activate brittle fracture (restoring) scheme or not
+       rn_fsd_brit_grad = -2.           !   max. gradient of number-density FSD in log-log space
+       rn_fsd_brit_tres = 2.592e6       !   restoring time scale (in seconds; default => 30 days)
 /
 !------------------------------------------------------------------------------
 &namwav         ! wave-ice interactions

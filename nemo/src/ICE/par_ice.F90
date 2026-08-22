@@ -116,6 +116,7 @@ MODULE par_ice
    LOGICAL , PUBLIC ::   ln_fsd           !: Use FSD (T) or not (F)
    INTEGER , PUBLIC ::   nn_nfsd          !: Number of floe-size categories
    REAL(wp), PUBLIC ::   rn_floeshape     !: Floe shape parameter (dimensionless)
+   LOGICAL , PUBLIC ::   ln_fsd_brit      !: Activate FSD brittle fractue scheme or not
 
    !                                     !!** wave-ice interactions namelist (namwav)
    LOGICAL , PUBLIC ::   ln_ice_wav       !: Activate wave ice interactions (T) or not (F)

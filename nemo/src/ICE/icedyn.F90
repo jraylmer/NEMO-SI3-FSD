@@ -141,9 +141,9 @@ CONTAINS
       ! do wave fracture first if the attenuation scheme (called before ice_dyn) is active.
       !
       IF( ln_fsd ) THEN
-         IF( ln_ice_wav )   CALL ice_wav_frac( kt )   ! -- fracture by ocean waves
-                            CALL ice_fsd_brit         ! -- in-plane (brittle) fracture
-                            CALL lbc_lnk( 'icedyn', a_ifsd, 'T', 1._wp, ldfull = .TRUE. )
+         IF( ln_ice_wav  )   CALL ice_wav_frac( kt )   ! -- fracture by ocean waves
+         IF( ln_fsd_brit )   CALL ice_fsd_brit         ! -- in-plane (brittle) fracture
+                             CALL lbc_lnk( 'icedyn', a_ifsd, 'T', 1._wp, ldfull = .TRUE. )
       ENDIF
 
       SELECT CASE( nice_dyn )          !-- Set which dynamics is running

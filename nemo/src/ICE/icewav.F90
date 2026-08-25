@@ -732,9 +732,8 @@ CONTAINS
       REAL(wp), DIMENSION(nn_nfsd)            ::   za_ifsd_tend         ! tendency of FSD due to wave fracture
       REAL(wp)                                ::   zh_i                 ! mean ice thickness
       REAL(wp)                                ::   zfsd_res             ! correction term for area conservation
-      REAL(wp)                                ::   zdt_sub              ! adaptive time step (s)
-      REAL(wp)                                ::   ztelapsed            ! time elapsed during adaptive time stepping (s)
-      INTEGER                                 ::   isubt                ! number of adaptive time steps used
+      REAL(wp)                                ::   zt_elapsed           ! time elapsed during adaptive time stepping (units: s)
+      INTEGER                                 ::   isubt                ! number of iterations used in adaptive time stepping
       INTEGER                                 ::   ji, jj, jl, jf       ! dummy loop indices
       !
       !                                                                 ! --  Z16 scheme only -- !
@@ -745,7 +744,6 @@ CONTAINS
       INTEGER                                 ::   zstat, znumfrac      ! to track how often convergence not reached
       !
       REAL(wp), PARAMETER                     ::   zat_i_min = .01_wp   ! minimum concentration for fracture to occur
-      INTEGER , PARAMETER                     ::   isubt_max = 100      ! maximum number of adaptive time steps before warning
       !
       !!-------------------------------------------------------------------
 
@@ -867,10 +865,10 @@ CONTAINS
                      ! (3) Evolve the FSD with adaptive time stepping
                      !
                      ! Initialise:
-                     ztelapsed = 0._wp
-                     isubt     = 0
+                     zt_elapsed = 0._wp   ! time elapsed during adaptive time stepping
+                     isubt      = 0       ! number of sub time steps taken
                      !
-                     DO WHILE (ztelapsed < rDt_ice)
+                     DO WHILE (zt_elapsed < rDt_ice)
                         !
                         ! Exit loop if all ice already in smallest floe size category:
                         IF( a_ifsd(ji,jj,1,jl) >= 1._wp - epsi10 ) EXIT
@@ -883,21 +881,8 @@ CONTAINS
                         !
                         WHERE( ABS(za_ifsd_tend) < epsi10 ) za_ifsd_tend = 0._wp
                         !
-                        ! Compute adaptive timestep to increment FSD in each floe size category:
-                        CALL ice_fsd_tstep( 'ice_wav_frac', a_ifsd(ji,jj,:,jl), za_ifsd_tend(:), zdt_sub )
-
-                        ! Make sure to not overshoot actual timestep:
-                        zdt_sub = MIN(zdt_sub, rDt_ice - ztelapsed)
-
-                        ! Update FSD and time elapsed:
-                        a_ifsd(ji,jj,:,jl) = a_ifsd(ji,jj,:,jl) + zdt_sub * za_ifsd_tend(:)
-                        ztelapsed          = ztelapsed + zdt_sub
-                        isubt              = isubt + 1
-                        !
-                        IF( isubt == isubt_max ) THEN
-                           CALL ctl_warn('ice_wav_frac not converging: ',               &
-                              &          'reached maximum number of adaptive time steps')
-                        ENDIF
+                        ! Evolve a_ifsd over maximum stable time step and increase zt_elapsed accordingly:
+                        CALL ice_fsd_tstep('ice_wav_frac', a_ifsd(ji,jj,:,jl), za_ifsd_tend(:), zt_elapsed, isubt)
                         !
                      ENDDO ! while loop
                      !

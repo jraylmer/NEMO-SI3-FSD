@@ -107,11 +107,12 @@ CONTAINS
       REAL(wp), DIMENSION(0:nlay_i+1) ::   zh_i_old, ze_i_old, zs_i_old
       !
       ! For floe size distribution:
-      REAL(wp), DIMENSION(jpl) ::   zda_latgro        ! fsd: change in ice area due to lateral growth in cat. jl
-      REAL(wp), DIMENSION(jpl) ::   zv_latgro_cat     ! fsd: lateral growth volume in cat. jl
-      REAL(wp)                 ::   zv_latgro         ! fsd: lateral growth volume, total
-      REAL(wp)                 ::   zv_newice_total   ! fsd: new ice + lat. growth, used when updating e_i and szv_i
-      INTEGER                  ::   jcat_fsd          ! fsd: new ice floe size category
+      REAL(wp), DIMENSION(jpl) ::   zda_latgro      ! area change due to lateral growth of existing ice, per category
+      REAL(wp), DIMENSION(jpl) ::   zv_fsdl_cat     ! lateral growth (of existing ice) volume, per category
+      REAL(wp)                 ::   zv_fsdb         ! basal   growth (of existing ice) volume, total
+      REAL(wp)                 ::   zv_newice_tot   ! used when updating e_i and szv_i
+      REAL(wp)                 ::   zG_s            ! floe lateral growth rate (ds/dt; units: m/s)
+      INTEGER                  ::   jcat_fsd        ! new ice floe size category
       !
       REAL(wp), DIMENSION(A2D(0),nn_nfsd,jpl) ::   za_ifsdb_latgro   ! a_ifsd before lateral growth, for diagnostics
       REAL(wp), DIMENSION(A2D(0),nn_nfsd,jpl) ::   za_ifsda_latgro   ! "      after  lateral growth  "
@@ -119,7 +120,6 @@ CONTAINS
       REAL(wp), DIMENSION(A2D(0),jpl)         ::   za_ib_latgro      ! a_i before lateral growth, for diagnostics
       REAL(wp), DIMENSION(A2D(0),jpl)         ::   za_ia_latgro      ! "   after  lateral growth  "
       REAL(wp), DIMENSION(A2D(0),jpl)         ::   za_ia_newice      ! "   after  new ice growth  "
-      !
       !!-----------------------------------------------------------------------!
       !
       IF( ln_timing    )   CALL timing_start('icethd_do')
@@ -231,22 +231,28 @@ CONTAINS
                IF( ln_fsd ) THEN
                   ! --- floe size distribution --- !
                   !
-                  ! Partition new ice growth (zv_newice) into open water new ice
-                  ! growth and lateral growth at floe edges. The latter is
-                  ! assigned to zv_latgro, zv_newice is updated accordingly, then
-                  ! the latter is treated as usual regardless of ln_fsd:
+                  ! Partition new ice volume (zv_newice) into growth of new floes and growth of existing
+                  ! floes. Latter is further partitioned into a lateral growth term, leading to new ice
+                  ! area zda_latgro(:), and a basal growth term, leading to new ice volume zv_fsdb to be
+                  ! distributed as thickness at the end of ice_thd_do (along with residual and frazil terms).
                   !
-                  CALL ice_fsd_part_newice( za_b(:), zv_b(:), a_ifsd(ji,jj,:,:), zv_newice, zv_latgro, zda_latgro )
+                  ! The following subroutine updates zv_newice to represent 'new floes' growth only, to be then
+                  ! treated as usual, and also returns the lateral growth rate, zG_s, to update a_ifsd later:
+                  !
+                  CALL ice_fsd_part_newice( za_b(:)  , zv_b(:), a_ifsd(ji,jj,:,:), rn_amax_2d(ji,jj),   &
+                     &                      zv_newice, zv_fsdb, zda_latgro(:)    , zG_s                 )
                   !
                ELSE
-                  zv_latgro     = 0._wp
-                  zda_latgro(:) = 0._wp   ! area changes due to lateral growth
+                  ! ensure these variables are set anyway:
+                  zv_fsdb       = 0._wp   ! no basal growth partition
+                  zda_latgro(:) = 0._wp   ! no area changes due to lateral growth
+                  zG_s          = 0._wp   ! not used
                ENDIF
 
                ! Lateral growth volume per category is calculated during the loop
                ! below where they are added to v_i in place, but will need to
                ! save them anyway (to this array) for later update of e_i:
-               zv_latgro_cat(:) = 0._wp
+               zv_fsdl_cat(:) = 0._wp
 
                ! A fraction fraz_frac of frazil ice is accreted at the ice bottom
                IF( at_i(ji,jj) > 0._wp ) THEN
@@ -284,35 +290,30 @@ CONTAINS
 
                   ! --- floe size distribution --- !
                   !
-                  ! Lateral growth of existing ice in all thickness categories.
-                  ! FSD is updated with new ice in ice_fsd_add_newice, called later.
-                  ! Note if ln_fsd = .false. then zda_latgro(:) = 0.
+                  ! Lateral growth of existing ice in all thickness categories;
+                  ! FSD is updated with new ice in ice_fsd_add_newice, called later
                   !
-                  IF( zda_latgro(jl) > 0._wp ) THEN
+                  IF( ln_fsd ) THEN
                      !
                      a_i(ji,jj,jl) = a_i(ji,jj,jl) + zda_latgro(jl)
                      !
-                     IF( a_i(ji,jj,jl) > 0._wp ) THEN
-                        !
+                     ! Here, if za_b(jl) == 0., zda_latgro(jl) == 0. (see ice_fsd_part_newice)
+                     ! but a_i(jcat) > 0. even if za_b(jcat) == 0., as former updated with new ice area above
+                     ! (point is that we must use za_b and zv_b here):
+                     IF( za_b(jl) > 0._wp ) THEN
                         ! Lateral growth volume for this thickness cat. (save for updating e_i later):
-                        ! NOTE: use zv_b/za_b, not v_i/a_i: latter already updated above with
-                        ! new ice for one of the categories!
-                        !
-                        zv_latgro_cat(jl) = zda_latgro(jl) * zv_b(jl) / za_b(jl)
-                        v_i(ji,jj,jl) = v_i(ji,jj,jl) + zv_latgro_cat(jl)
+                        zv_fsdl_cat(jl) = zda_latgro(jl) * zv_b(jl) / za_b(jl)
+                        v_i(ji,jj,jl) = v_i(ji,jj,jl) + zv_fsdl_cat(jl)
                      ENDIF
-                     !
+
                      ! Update FSD due to lateral growth:
-                     CALL ice_fsd_thd( a_ifsd(ji,jj,:,jl), zv_latgro / rDt_ice )
-                     !
-                  ENDIF
-                  !
-                  ! Save FSD and a_i after lateral growth for diagnostics:
-                  IF( ln_fsd ) THEN
+                     CALL ice_fsd_thd( a_ifsd(ji,jj,:,jl), zG_s )
+
+                     ! Save FSD and a_i after lateral growth for diagnostics:
                      za_ifsda_latgro(ji,jj,:,jl) = a_ifsd(ji,jj,:,jl)
                      !
                      ! CAREFUL: a_i has now evolved due to new ice AND lateral growth. So, get what it
-                     ! would be only due to lateral growth from za_b (start of time step) and zda_latgro:
+                     ! would be only due to lateral growth from za_b (start of time step) and zfsd_da_latgro:
                      za_ia_latgro(ji,jj,jl) = za_b(jl) + zda_latgro(jl)
                   ENDIF
                   ! ------------------------------ !
@@ -322,11 +323,10 @@ CONTAINS
 
                ! --- floe size distribution --- !
                !
-               ! For new ice cat (jcat), this needs to be AFTER lateral growth of FSD
-               ! (i.e., subroutine ice_thd_evolve). It also requires a_i BEFORE new ice
-               ! growth, but AFTER lateral growth, which are both done above but we can
-               ! recover the correct value using za_b (a_i at beginning of ice_thd_do)
-               ! and zda_latgro (FSD lateral area growth per thickness category):
+               ! Update of FSD with new ice (in jl=jcat) needs to be AFTER lateral growth (ice_fsd_thd).
+               ! It also requires a_i BEFORE new ice but AFTER lateral growth, which are both done above
+               ! but we can recover the correct value using za_b (a_i at beginning of ice_thd_do)
+               ! and zda_latgro (lateral area growth of existing ice per thickness category):
                !
                IF( ln_fsd ) THEN
                   !
@@ -352,24 +352,24 @@ CONTAINS
                !
                ! With floe size distribution, we have added new ice area to all categories
                ! --> update enthalpy (e_i) and salinity content (szv_i) in each category
-               !     using zv_latgro_cat calculated above.
+               !     using zv_fsdl_cat calculated above.
                !
                ! Without floe size distribution, we only add new ice area to category jcat
                ! --> update in category jcat only; other jl in loop below therefore does
-               !     nothing, as zv_latgro_cat will be 0, recovering original implementation
+               !     nothing, as zv_fsdl_cat will be 0, recovering original implementation
                !     prior to adding FSD.
                !
                DO jl = 1, jpl
                   ! Total new ice volume added laterally (from FSD) and from new ice (if jl == jcat):
-                  zv_newice_total = zv_latgro_cat(jl)
-                  IF( jl == jcat ) zv_newice_total = zv_newice_total + zv_newice
+                  zv_newice_tot = zv_fsdl_cat(jl)
+                  IF( jl == jcat ) zv_newice_tot = zv_newice_tot + zv_newice
                   !
-                  IF( zv_newice_total > 0._wp ) THEN
+                  IF( zv_newice_tot > 0._wp ) THEN
                      IF( za_b(jl) > 0._wp ) THEN
-                        e_i(ji,jj,:,jl) = ( ze_newice     * zv_newice_total + e_i(ji,jj,:,jl) * zv_b(jl) ) / MAX( v_i(ji,jj,jl), epsi20 )
-                        szv_i(ji,jj,:,jl) = ( zs_newice(ji,jj) * zv_newice_total + szv_i(ji,jj,:,jl) * zv_b(jl) ) / MAX( v_i(ji,jj,jl), epsi20 )
+                        e_i(ji,jj,:,jl)   = ( ze_newice        * zv_newice_tot + e_i  (ji,jj,:,jl) * zv_b(jl) ) / MAX( v_i(ji,jj,jl), epsi20 )
+                        szv_i(ji,jj,:,jl) = ( zs_newice(ji,jj) * zv_newice_tot + szv_i(ji,jj,:,jl) * zv_b(jl) ) / MAX( v_i(ji,jj,jl), epsi20 )
                      ELSE
-                        e_i(ji,jj,:,jl) = ze_newice
+                        e_i(ji,jj,:,jl)   = ze_newice
                         szv_i(ji,jj,:,jl) = zs_newice(ji,jj)
                      ENDIF
                   ENDIF
@@ -388,9 +388,9 @@ CONTAINS
                      zs_i_old(jk) = szv_i(ji,jj,jk,jl) * v_i(ji,jj,jl) * r1_nlay_i
                   END DO
 
-                  ! new volumes including lateral/bottom accretion + residual
+                  ! new volumes including lateral/bottom accretion + residual + basal growth partition from FSD
                   IF( at_i(ji,jj) >= epsi20 ) THEN
-                     zv_newfra     = ( zdv_res + zv_frazb ) * a_i(ji,jj,jl) / MAX( at_i(ji,jj) , epsi20 )
+                     zv_newfra     = ( zdv_res + zv_frazb + zv_fsdb ) * a_i(ji,jj,jl) / MAX( at_i(ji,jj) , epsi20 )
                   ELSE                  
                      zv_newfra     = 0._wp
                      a_i(ji,jj,jl) = 0._wp
@@ -408,7 +408,7 @@ CONTAINS
                                          CALL ice_var_vremap( zh_i_old, ze_i_old, e_i(ji,jj,:,jl) ) 
                   IF( nn_icesal == 4 )   CALL ice_var_vremap( zh_i_old, zs_i_old, szv_i(ji,jj,:,jl) ) 
 
-                  ! --- Floe welding (only changes FSD) --- !
+                  ! --- Floe welding (only changes FSD, a_ifsd, not ITD, a_i) --- !
                   IF( ln_fsd ) CALL ice_fsd_weld( a_ifsd(ji,jj,:,jl), a_i(ji,jj,jl) )
                   !
                END DO

@@ -139,19 +139,16 @@ CONTAINS
             zwlat  = zm1 * ( MAX( 0._wp, sst_m(ji,jj) - ( t_bo(ji,jj) - rt0 ) ) )**zm2  ! Melt speed rate [m/s]
             !
             IF( ln_fsd ) THEN
-               ! --- Calculate reduction of sea ice concentration (category)
-               !     using perimeter density from floe size distribution, P_FSD.
-               !     Note P_FSD returned by fsd_peri_dens() is per unit sea ice area;
-               !     multiplying by sea ice concentration gives per unit ocean area as
-               !     required here. Then, in notation from docs above:
+               ! Calculate reduction of sea ice concentration (category) using perimeter density from floe
+               ! size distribution, P_FSD. Note P_FSD returned by fsd_peri_dens() is per unit sea ice area:
+               ! multiplying by sea ice conc. gives perimeter per unit ocean area as needed here.
+               ! Then, in notation from docstring above:
                !
-               !     dA/dt = -W * A * ( P_FSD + FSD(1)/dr(1) )
+               !    dA/dt = -W * A * [ (pi / 2*a_shape) * FSD(1)/dr(1) + P_FSD ]
                !
-               !     where the second term FSD(1)/dr(1) accounts for loss of ice area from
-               !     smallest floe size category due to complete melt of smallest floes
-               !     (first term gives change in A due to existing floes shrinking only).
-               !     It comes from the divergence term in the tendency of FSD due to
-               !     thermodynamics (see ice_fsd_thd_evolve/docs).
+               ! where the first term represents the loss of ice area from the smallest floe size category
+               ! due to complete melt of smallest floes and the second term corresponds to existing floes
+               ! shrinking only. See external FSD docs for derivation/details.
                !
                zda = zwlat * rDt_ice * a_i(ji,jj,jl_cat) * ( fsd_peri_dens( a_ifsd(ji,jj,:,jl_cat) )   &
                   &                                          + rpi * a_ifsd(ji,jj,1,jl_cat) / (2._wp * rn_floeshape * floe_ds(1)) )
@@ -188,7 +185,7 @@ CONTAINS
             ! new concentration
             a_i(ji,jj,jl_cat) = a_i(ji,jj,jl_cat) - zda
             
-            ! update floe size distribution
+            ! update floe size distribution [using ds/dt = -pi*wlat / (2*a_shape)]:
             IF( ln_fsd ) CALL ice_fsd_thd( a_ifsd(ji,jj,:,jl_cat), -rpi * zwlat / (2._wp * rn_floeshape) )
 
             ! ensure that h_i = 0 where a_i = 0

@@ -361,7 +361,7 @@ CONTAINS
                   ztmelts          = - rTmlt * sz_i(ji,jj,jk,jl) + rt0 ! melting temperature in K
                   e_i(ji,jj,jk,jl) = zswitch(ji,jj) * v_i(ji,jj,jl) * r1_nlay_i * &
                      &               rhoi * (  rcpi  * ( ztmelts - t_i(ji,jj,jk,jl) ) + &
-                     &                         rLfus * ( 1._wp - (ztmelts-rt0) / MIN( (t_i(ji,jj,jk,jl)-rt0), -epsi20 ) ) &
+                     &                         rLfus * MAX( 0._wp, 1._wp - (ztmelts-rt0) / MIN( (t_i(ji,jj,jk,jl)-rt0), -epsi10 ) ) & ! clem: max to deal with different eq. freezing in ice and ocean (but useless for now)
                      &                       - rcp   * ( ztmelts - rt0 ) )
                END_3D
             END DO

@@ -118,6 +118,7 @@ CONTAINS
       INTEGER, INTENT(in) ::   Kbb, Kmm ! ocean time level indices
       INTEGER, INTENT(in) ::   ksbc     ! flux formulation (user defined, bulk, or Pure Coupled)
       !
+      REAL(wp), DIMENSION(A2D(nn_hls)) ::   zdep    ! mid-depth of the 1st ocean layer at T-pts
       INTEGER ::   ji, jj, jl   ! dummy loop index
       !!----------------------------------------------------------------------
       !
@@ -130,9 +131,11 @@ CONTAINS
          DO_2D( nn_hls, nn_hls, nn_hls, nn_hls )                      ! mean surface ocean current
             u_oce(ji,jj) = ssu_m(ji,jj)
             v_oce(ji,jj) = ssv_m(ji,jj)
+            zdep (ji,jj) = e3t_m(ji,jj) * 0.5_wp
          END_2D
          !
          CALL eos_fzp( sss_m(:,:), t_bo(:,:), kbnd=0 )                    ! freezing temperature [Kelvin] (set to rt0 over land)
+         !!CALL eos_fzp( sss_m(:,:), t_bo(:,:), pdep=zdep, kbnd=0 )       ! freezing temperature [Kelvin] (set to rt0 over land)
          t_bo(:,:) = ( t_bo(:,:) + rt0 ) * smask0(:,:) + rt0 * ( 1._wp - smask0(:,:) )
          !
          IF( ln_fsd ) THEN

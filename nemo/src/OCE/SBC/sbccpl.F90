@@ -211,7 +211,6 @@ MODULE sbccpl
       &             sn_rcv_wstrf, sn_rcv_wdrag, sn_rcv_charn, sn_rcv_taw, sn_rcv_bhd, sn_rcv_tsd, &
       &             sn_rcv_wpf, sn_rcv_wspec
    !                                   ! Other namelist parameters
-   INTEGER     ::   nn_cplmodel           ! Maximum number of models to/from which NEMO is potentialy sending/receiving data
    LOGICAL     ::   ln_usecplmask         !  use a coupling mask file to merge data received from several models
                                           !   -> file cplmask.nc with the float variable called cplmask (jpi,jpj,nn_cplmodel)
    LOGICAL     ::   ln_scale_ice_flux     !  use ice fluxes that are already "ice weighted" ( i.e. multiplied ice concentration)
@@ -2305,7 +2304,7 @@ CONTAINS
                   ENDDO
                CASE default                  ;   CALL ctl_stop( 'sbc_cpl_snd: wrong definition of sn_snd_temp%clcat' )
                END SELECT
-            CASE( 'oce and weighted ice')    ;   ztmp1(A2D(0)) =   ts(A2D(0),1,jp_tem,Kmm) + rt0
+            CASE( 'oce and weighted ice')    ;   ztmp1(A2D(0)) = ztmp1(A2D(0)) + rt0
                SELECT CASE( sn_snd_temp%clcat )
                CASE( 'yes' )
                   ztmp3(A2D(0),1:jpl) = tn_ice(A2D(0),1:jpl) * a_i(A2D(0),1:jpl)
@@ -2614,7 +2613,7 @@ CONTAINS
             !
             IF( smysnd(jps_ivx1)%laction ) THEN           ! ice velocities
                ztmp1(A2D(0)) = zitx1(A2D(0))
-               ztmp1(A2D(0)) = zity1(A2D(0))
+               ztmp2(A2D(0)) = zity1(A2D(0))
                CALL oce2geo ( ztmp1, ztmp2, 'T', zitx1, zity1, zitz1 )
             ENDIF
          ENDIF
@@ -2686,7 +2685,7 @@ CONTAINS
          !            !
          !            IF( smysnd(jps_ivx1)%laction ) THEN           ! ice velocities
          !               ztmp1(A2D(0)) = zitx1(A2D(0))
-         !               ztmp1(A2D(0)) = zity1(A2D(0))
+         !               ztmp2(A2D(0)) = zity1(A2D(0))
          !               CALL oce2geo ( ztmp1, ztmp2, 'T', zitx1, zity1, zitz1 )
          !            ENDIF
          !         ENDIF

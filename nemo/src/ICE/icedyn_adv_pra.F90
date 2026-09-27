@@ -671,6 +671,7 @@ CONTAINS
             zfm (ji,jj) = zfm (ji,jj) + zalf  *   psm (ji+1,jj)
             zf0 (ji,jj) = zf0 (ji,jj) + zalf  * ( ps0 (ji+1,jj) &
                &                                - z1malf * ( psx (ji+1,jj,jcat) - ( z1malf - zalf ) * psxx(ji+1,jj,jcat) ) )
+            zfx (ji,jj) = zfx (ji,jj) + zalf2 * (            psx (ji+1,jj,jcat) - 3._wp *  z1malf   * psxx(ji+1,jj,jcat) )
             zfxx(ji,jj) = zfxx(ji,jj) + zalf3 *              psxx(ji+1,jj,jcat)
             zfy (ji,jj) = zfy (ji,jj) + zalf  * (            psy (ji+1,jj,jcat) -          z1malf   * psxy(ji+1,jj,jcat) )
             zfyy(ji,jj) = zfyy(ji,jj) + zalf  *              psyy(ji+1,jj,jcat)

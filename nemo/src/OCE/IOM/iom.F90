@@ -127,8 +127,9 @@ CONTAINS
       !
       REAL(wp), ALLOCATABLE, DIMENSION(:,:) :: zt_bnds, zw_bnds
       REAL(wp), DIMENSION(2,jpkam1)         :: za_bnds   ! ABL vertical boundaries
+      REAL(wp)    :: zz
       LOGICAL ::   ll_closedef
-      LOGICAL ::   ll_exist
+      LOGICAL ::   ll_exist, ll_tst
       !!----------------------------------------------------------------------
       !
       ll_closedef = .TRUE.
@@ -171,6 +172,12 @@ CONTAINS
       CASE (30)   ;   CALL xios_define_calendar( TYPE = "D360",      time_origin = ref_date, start_date = start_date )
       END SELECT
 
+      ! Physical constants definition
+      ll_tst = xios_setvar( 'rho0'   , rho0 )
+      ll_tst = xios_setvar( 'cpocean', rcp  )
+      ll_tst = xios_setvar( 'rhoic'  , rhoi )
+      ll_tst = xios_setvar( 'rhosn'  , rhos )
+      
       ! horizontal grid definition
       IF(.NOT.llrst_context) CALL set_scalar
       !
@@ -313,6 +320,7 @@ CONTAINS
       CHARACTER(len=*), OPTIONAL, INTENT(IN) :: cdname
 #if defined key_xios
       LOGICAL :: llrstw
+
 
       llrstw = .FALSE.
       IF(PRESENT(cdname)) THEN
@@ -541,7 +549,7 @@ CONTAINS
       ELSEIF(PRESENT(rs3)) THEN
          CALL xios_set_attr (field_hdl, enabled = .TRUE., name = sdfield,   &
                              domain_ref = "grid_N"//TRIM(clgsuf),           &
-                             axis_ref = iom_axis(size(rd3, 3)),             &
+                             axis_ref = iom_axis(size(rs3, 3)),             &
                              prec = sp, operation = "instant"               )
       ELSEIF(PRESENT(rd2)) THEN
          CALL xios_set_attr (field_hdl, enabled = .TRUE., name = sdfield,   &
@@ -557,7 +565,7 @@ CONTAINS
                              prec = dp, operation = "instant"               )
       ELSEIF(PRESENT(rs1)) THEN
          CALL xios_set_attr (field_hdl, enabled = .TRUE., name = sdfield,   &
-                             axis_ref = iom_axis(size(rd1, 1)),             &
+                             axis_ref = iom_axis(size(rs1, 1)),             &
                              prec = sp, operation = "instant"               )
       ELSEIF(PRESENT(rd0)) THEN
          CALL xios_set_attr (field_hdl, enabled = .TRUE., name = sdfield,   &

@@ -109,13 +109,14 @@
       <field id="yield22"      long_name="yield surface tensor component 22"                       standard_name="yield22"                                   unit="N/m"  />
       <field id="yield12"      long_name="yield surface tensor component 12"                       standard_name="yield12"                                   unit="N/m"  />
       <field id="beta_evp"     long_name="Relaxation parameter of ice rheology (beta)"             standard_name="relaxation_parameter_of_ice_rheology"      unit=""     grid_ref="grid_T_sfc" />
-      <field id="lead_open"    long_name="Lead area opening rate"                                  standard_name="lead_open"                                    unit="1/s"  />
-      <field id="rdg_loss"     long_name="Ridging ice area loss rate"                              standard_name="rdg_loss"                                 unit="1/s"  />
-      <field id="rft_loss"     long_name="Rafting ice area loss rate"    
-standard_name="rft_loss"                                 unit="1/s"  />
-      <field id="rdg_gain"     long_name="New ridged ice area gain rate"                             standard_name="rdg_gain"                                 unit="1/s"  />
-      <field id="rft_gain"     long_name="New rafted ice area gain rate"                            standard_name="rft_gain"                                 unit="1/s"  />
-
+      <field id="lead_open"    long_name="Lead area opening rate"                                  standard_name="lead_open"                                 unit="1/s"  />
+      <field id="lead_close"   long_name="Lead area closing rate"                                  standard_name="lead_close"                                unit="1/s"  />
+      <field id="ardg_loss"    long_name="Ridging ice area loss rate"                              standard_name="ardg_loss"                                 unit="1/s"  />
+      <field id="arft_loss"    long_name="Rafting ice area loss rate"                              standard_name="arft_loss"                                 unit="1/s"  />
+      <field id="ardg_gain"    long_name="New ridged ice area gain rate"                           standard_name="ardg_gain"                                 unit="1/s"  />
+      <field id="arft_gain"    long_name="New rafted ice area gain rate"                           standard_name="arft_gain"                                 unit="1/s"  />
+      <field id="vrdg_gain"    long_name="New ridged ice volume gain rate"                         standard_name="vrdg_gain"                                 unit="1/s"  />
+      <field id="vrft_gain"    long_name="New rafted ice volume gain rate"                         standard_name="vrft_gain"                                 unit="1/s"  />
 
       <!-- surface heat fluxes -->
       <field id="qt_ice"       long_name="total heat flux at ice surface"                          standard_name="surface_downward_heat_flux_in_air"         unit="W/m2" />

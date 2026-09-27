@@ -153,10 +153,10 @@ def calc_iweld(sl, sc, su):
     """
 
     nfsd = len(sl)
-    iweld = np.zeros((nfsd,nfsd), dtype=int)
+    iweld = -1 * np.ones((nfsd,nfsd), dtype=int)
 
     for j1 in range(nfsd):
-        for j2 in range(nfsd):
+        for j2 in range(j1, nfsd):
             aweld = sc[j1]**2 + sc[j2]**2  # ~ area of welded floe
             for j3 in range(nfsd-1):  # find welded category
                 if aweld >= sl[j3]**2 and aweld < su[j3]**2:

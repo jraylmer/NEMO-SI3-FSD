@@ -31,8 +31,10 @@ MODULE icethd_da
    PUBLIC   ice_thd_da_init   ! called by icestp.F90
 
    !                      !!** namelist (namthd_da) **
-   REAL(wp) ::   rn_beta   ! coef. beta for lateral melting param.
-   REAL(wp) ::   rn_dmin   ! minimum floe diameter for lateral melting param.
+   REAL(wp) ::   rn_dfloe       ! constant floe diameter for lateral melt calculation  (ln_dfloe_L12=F)
+   LOGICAL  ::   ln_dfloe_L12   ! use Lupkes et al. (2012) param. variable floe size
+   REAL(wp) ::   rn_beta        ! coef. beta for L12 lateral melting param.            (ln_dfloe_L12=T)
+   REAL(wp) ::   rn_dmin        ! minimum floe diameter for L12 lateral melting param. (ln_dfloe_L12=T)
 
    !! * Substitutions
 #  include "do_loop_substitute.h90"
@@ -88,6 +90,9 @@ CONTAINS
       !!               Birnbaum and Lupkes (2002), Lupkes and Birnbaum (2005). They are reviewed in Lupkes et al 2012
       !!               A simpler implementation for CICE can be found in Bitz et al (2001) and Tsamados et al (2015)
       !!
+      !!               One can also assume D = constant by setting rn_dfloe and deactivating Lupkes param.
+      !!               (ln_dfloe_L12 = F); otherwise, equations above are the same.
+      !!
       !!               If using prognostic floe size distribution (FSD), P above is instead calculated from the FSD
       !!               for the given thickness category (using external function fsd_peri_dens) and the change in A
       !!               for the given thickness category is calculated accordingly using the same lateral melt rate W.
@@ -125,7 +130,7 @@ CONTAINS
       REAL(wp), DIMENSION(nlay_i) ::   zs_i      ! ice salinity      
       !!---------------------------------------------------------------------
       !
-      zastar = 1._wp / ( 1._wp - (rn_dmin / zdmax)**(1._wp/rn_beta) )
+      IF( ln_dfloe_L12 ) zastar = 1._wp / ( 1._wp - (rn_dmin / zdmax)**(1._wp/rn_beta) )
       !
       DO_2D( 0, 0, 0, 0 )
          !
@@ -158,7 +163,11 @@ CONTAINS
                !
             ELSE
                ! --- Calculate reduction of total sea ice concentration --- !
-               zdfloe = rn_dmin * ( zastar / ( zastar - at_i(ji,jj) ) )**rn_beta           ! Mean floe caliper diameter [m]
+               !
+               ! Mean floe caliper diameter [m] from Lupkes et al. (2012) param. or prescribed constant:
+               IF( ln_dfloe_L12 ) THEN   ;   zdfloe = rn_dmin * ( zastar / ( zastar - at_i(ji,jj) ) )**rn_beta
+               ELSE                      ;   zdfloe = rn_dfloe
+               ENDIF
                !
                zperi  = at_i(ji,jj) * rpi / ( zcs * zdfloe )                               ! Mean perimeter of the floe [m.m-2]
                !                                                                           !    = N*pi*D = (A/cs*D^2)*pi*D
@@ -216,7 +225,7 @@ CONTAINS
       !!-------------------------------------------------------------------
       INTEGER  ::   ios   ! Local integer
       !!
-      NAMELIST/namthd_da/ rn_beta, rn_dmin
+      NAMELIST/namthd_da/ rn_dfloe, ln_dfloe_L12, rn_beta, rn_dmin
       !!-------------------------------------------------------------------
       !
       READ_NML_REF(numnam_ice,namthd_da)
@@ -228,8 +237,10 @@ CONTAINS
          WRITE(numout,*) 'ice_thd_da_init: Ice lateral melting'
          WRITE(numout,*) '~~~~~~~~~~~~~~~'
          WRITE(numout,*) '   Namelist namthd_da:'
-         WRITE(numout,*) '      Coef. beta for lateral melting param.               rn_beta = ', rn_beta
-         WRITE(numout,*) '      Minimum floe diameter for lateral melting param.    rn_dmin = ', rn_dmin
+         WRITE(numout,*) '      Constant floe diameter (ln_dfloe_L12=F)            rn_dfloe = ', rn_dfloe
+         WRITE(numout,*) '      Use Lupkes et al. (2012) variable floe diam.   ln_dfloe_L12 = ', ln_dfloe_L12
+         WRITE(numout,*) '         Coef. beta for L12 param.                        rn_beta = ', rn_beta
+         WRITE(numout,*) '         Min. floe diameter for L12 param.                rn_dmin = ', rn_dmin
       ENDIF
       !
    END SUBROUTINE ice_thd_da_init

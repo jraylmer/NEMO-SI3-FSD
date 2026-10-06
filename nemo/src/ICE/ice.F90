@@ -73,6 +73,7 @@ MODULE ice
    !! a_ip        |    Ice pond concentration       |       |
    !! v_ip        |    Ice pond volume per unit area| m     |
    !! v_il        |    Ice pond lid volume per area | m     |
+   !! a_ifsd      |    Ice floe size distribution   |       |
    !! 
    !!-------------|---------------------------------|-------|
    !!                                                       |
@@ -260,6 +261,8 @@ MODULE ice
    REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:)     ::   hm_il         !: mean melt pond lid depth                     [m]
    REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:)     ::   vt_il         !: total melt pond lid volume per gridcell area [m]
 
+   REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:,:,:) ::   a_ifsd        !: floe size distribution
+
    REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:) ::   dh_s_tot      !: Snow accretion/ablation        [m]
    REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:) ::   dh_i_itm      !: Ice internal ablation [m]
    REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:) ::   dh_i_bom      !: Ice bottom ablation  [m]
@@ -282,12 +285,22 @@ MODULE ice
    REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:,:,:) ::   e_i_b, szv_i_b             !: ice temperatures and salt
    REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:)     ::   u_ice_b, v_ice_b           !: ice velocity
    REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:)     ::   at_i_b                     !: ice concentration (total)
+   REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:,:,:) ::   a_ifsd_b, a_ifsd_b0        !: floe size distribution
+   REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:,:,:)   ::   a_i_b0                     !: ice concentration (extra needed for FSD; see ice_stp)
 
    !!----------------------------------------------------------------------
    !! * Ice thickness distribution variables
    !!----------------------------------------------------------------------
    REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:)   ::   hi_max            !: Boundary of ice thickness categories in thickness space
    REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:)   ::   hi_mean           !: Mean ice thickness in catgories
+   !
+   !!----------------------------------------------------------------------
+   !! * Ice floe size distribution variables (shared)
+   !!----------------------------------------------------------------------
+   REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:)   ::   floe_sl           !: Floe size at lower bound of category (m)
+   REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:)   ::   floe_sc           !: Floe size at centre of categories    (m)
+   REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:)   ::   floe_su           !: Floe size at upper bound of category (m)
+   REAL(wp), PUBLIC, ALLOCATABLE, SAVE, DIMENSION(:)   ::   floe_ds           !: Floe size category width             (m)
    !
    !!----------------------------------------------------------------------
    !! * Ice diagnostics
@@ -349,7 +362,7 @@ CONTAINS
       !!-----------------------------------------------------------------
       INTEGER :: ice_alloc
       !
-      INTEGER :: ierr(22), ii
+      INTEGER :: ierr(25), ii
       !!-----------------------------------------------------------------
       ierr(:) = 0
       ii = 0
@@ -374,6 +387,12 @@ CONTAINS
 
       ii = ii + 1
       ALLOCATE( e_s(jpi,jpj,nlay_s,jpl) , e_i(jpi,jpj,nlay_i,jpl) , szv_i(jpi,jpj,nlay_i,jpl) , STAT=ierr(ii) )
+
+      ! * Floe size distribution
+      IF( ln_fsd ) THEN
+         ii = ii + 1
+         ALLOCATE( a_ifsd(jpi,jpj,jpf,jpl), STAT = ierr(ii) )
+      ENDIF
 
       ! * Before values of global variables
       ii = ii + 1
@@ -413,6 +432,12 @@ CONTAINS
          &      v_s_b (A2D(0),jpl) , h_s_b (A2D(0),jpl) ,                                          &
          &      v_ip_b(A2D(0),jpl) , v_il_b(A2D(0),jpl) , sv_i_b(A2D(0),jpl) ,                     &
          &      e_i_b (A2D(0),nlay_i,jpl) , e_s_b(A2D(0),nlay_s,jpl) , szv_i_b (A2D(0),nlay_i,jpl) , STAT=ierr(ii) )
+
+      ! * Floe size distribution
+      IF( ln_fsd ) THEN
+         ii = ii + 1
+         ALLOCATE( a_ifsd_b(A2D(0),jpf,jpl), a_ifsd_b0(A2D(0),jpf,jpl), a_i_b0(A2D(0),jpl), STAT=ierr(ii) )
+      ENDIF
 
       ! * fluxes
       ii = ii + 1
@@ -458,6 +483,12 @@ CONTAINS
       ! * Ice thickness distribution variables
       ii = ii + 1
       ALLOCATE( hi_max(0:jpl), hi_mean(jpl),  STAT=ierr(ii) )
+
+      ! * Floe size distribution variables (shared)
+      IF( ln_fsd ) THEN
+         ii = ii + 1
+         ALLOCATE( floe_sl(jpf), floe_sc(jpf), floe_su(jpf), floe_ds(jpf), STAT=ierr(ii) )
+      ENDIF
 
       ! * Ice diagnostics
       ii = ii + 1
@@ -536,6 +567,7 @@ CONTAINS
       DEALLOCATE( diag_v  , diag_s  , diag_t ,   &
          &      diag_fv , diag_fs , diag_ft )
       DEALLOCATE( t_si , tm_si , qcn_ice_bot , qcn_ice_top )      
+      IF( ln_fsd ) DEALLOCATE( a_ifsd, a_ifsd_b, a_ifsd_b0, a_i_b0, floe_sl, floe_sc, floe_su, floe_ds )
    END SUBROUTINE ice_dealloc
    
 #else

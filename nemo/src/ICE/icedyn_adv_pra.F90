@@ -117,7 +117,7 @@ CONTAINS
       IF( nn_icesal == 4 ) THEN   ;     ALLOCATE( z0si (jpi,jpj,nlay_i), zsz_i(jpi,jpj,nlay_i) )
       ELSE                        ;     ALLOCATE( z0smi(jpi,jpj)       , zs_i (jpi,jpj)        )
       ENDIF
-      IF( ln_fsd ) ALLOCATE( z0fsd(jpi,jpj,nn_nfsd) )
+      IF( ln_fsd ) ALLOCATE( z0fsd(jpi,jpj,jpf) )
       
       ! --- If ice drift is too fast, use  subtime steps for advection (CFL test for stability) --- !
       !        Note: the advection split is applied at the next time-step in order to avoid blocking global comm.
@@ -253,7 +253,7 @@ CONTAINS
             ENDIF
             !
             IF ( ln_fsd ) THEN
-               DO_3D( ihls+1, ihls+1, ihls+1, ihls+1, 1, nn_nfsd )
+               DO_3D( ihls+1, ihls+1, ihls+1, ihls+1, 1, jpf )
                   z0fsd(ji,jj,jk) = pa_ifsd(ji,jj,jk,jl) * e1e2t(ji,jj)
                END_3D
             ENDIF
@@ -313,7 +313,7 @@ CONTAINS
                ENDIF
                !
                IF ( ln_fsd ) THEN
-                  DO jk = 1, nn_nfsd                                                                                    !--- floe size distribution
+                  DO jk = 1, jpf                                                                                        !--- floe size distribution
                      CALL adv_x( ihls, jl, zdt, zudy, 1._wp, zarea, z0fsd(:,:,jk), sxfsd(:,:,jk,:),   &
                         &                          sxxfsd(:,:,jk,:), syfsd(:,:,jk,:), syyfsd(:,:,jk,:), sxyfsd(:,:,jk,:) )
                      CALL adv_y( ihls, jl, zdt, zvdx, 0._wp, zarea, z0fsd(:,:,jk), sxfsd(:,:,jk,:),   &
@@ -372,7 +372,7 @@ CONTAINS
                ENDIF
                !
                IF ( ln_fsd ) THEN
-                  DO jk = 1, nn_nfsd                                                                                    !--- floe size distribution
+                  DO jk = 1, jpf                                                                                        !--- floe size distribution
                      CALL adv_y( ihls, jl, zdt, zvdx, 1._wp, zarea, z0fsd(:,:,jk)  , sxfsd (:,:,jk,:),   &
                         &                         sxxfsd(:,:,jk,:), syfsd(:,:,jk,:), syyfsd(:,:,jk,:), sxyfsd(:,:,jk,:) )
                      CALL adv_x( ihls, jl, zdt, zudy, 0._wp, zarea, z0fsd(:,:,jk)  , sxfsd (:,:,jk,:),   &
@@ -413,7 +413,7 @@ CONTAINS
             ENDIF
             !
             IF ( ln_fsd ) THEN
-               DO_3D( ihls, ihls, ihls, ihls, 1, nn_nfsd )
+               DO_3D( ihls, ihls, ihls, ihls, 1, jpf )
                   pa_ifsd(ji,jj,jk,jl) = z0fsd(ji,jj,jk) * r1_e1e2t(ji,jj) * tmask(ji,jj,1)
                END_3D
             ENDIF
@@ -1236,8 +1236,8 @@ CONTAINS
       !
       ii = ii + 1
       IF ( ln_fsd ) THEN
-         ALLOCATE( sxfsd(jpi,jpj,nn_nfsd,jpl), syfsd(jpi,jpj,nn_nfsd,jpl), sxxfsd(jpi,jpj,nn_nfsd,jpl) , &
-            &      syyfsd(jpi,jpj,nn_nfsd,jpl), sxyfsd(jpi,jpj,nn_nfsd,jpl)                            , &
+         ALLOCATE( sxfsd (jpi,jpj,jpf,jpl) , syfsd (jpi,jpj,jpf,jpl) , sxxfsd(jpi,jpj,jpf,jpl) , &
+            &      syyfsd(jpi,jpj,jpf,jpl) , sxyfsd(jpi,jpj,jpf,jpl)                           , &
             &      STAT = ierr(ii) )
       ENDIF
       !
@@ -1420,8 +1420,8 @@ CONTAINS
                   znam = 'sxfsd'//'_l'//zchar1
                   IF( iom_varid( numrir, znam, ldstop = .FALSE. ) > 0 )   id_nfsd = id_nfsd + 1
                ENDDO
-               IF( id_nfsd == nn_nfsd ) THEN
-                  DO jk = 1, nn_nfsd
+               IF( id_nfsd == jpf ) THEN
+                  DO jk = 1, jpf
                      WRITE(zchar1,'(I2.2)') jk
                      znam = 'sxfsd'//'_l'//zchar1
                      CALL iom_get( numrir, jpdom_auto, znam , z3d, psgn = -1._wp )   ;   sxfsd (:,:,jk,:) = z3d(:,:,:)
@@ -1438,7 +1438,7 @@ CONTAINS
                   IF( id_nfsd == 0 ) THEN
                      IF(lwp) WRITE(numout,*) '   ==>>   previous run without floe size distribution output'
                      IF(lwp) WRITE(numout,*) '          we set FSD advection moments to 0'
-                  ELSE  ! id_nfsd /= nn_nfsd
+                  ELSE  ! id_nfsd /= jpf
                      CALL ctl_warn( 'adv_pra_rst ===>>> : inconsistent number of floe size categories in restart',  &
                         &           'we bypass reading of FSD advection moments, setting them to zero')
                   ENDIF
@@ -1594,7 +1594,7 @@ CONTAINS
             !                                                        ! floe size distribution
             !
             ! treat floe size categories as 'layers' (analogous to, e.g., heat content variables)
-            DO jk = 1, nn_nfsd
+            DO jk = 1, jpf
                WRITE(zchar1,'(I2.2)') jk
                znam = 'sxfsd'//'_l'//zchar1   ;   z3d(:,:,:) = sxfsd (:,:,jk,:)
                CALL iom_rstput( iter, nitrst, numriw, znam , z3d )

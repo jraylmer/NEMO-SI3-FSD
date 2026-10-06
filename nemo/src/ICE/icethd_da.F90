@@ -19,7 +19,7 @@ MODULE icethd_da
    USE phycst  , ONLY : rpi, rt0, rhoi, rhos
    USE sbc_oce, ONLY: sst_m
    USE ice
-   USE icefsd  , ONLY : fsd_peri_dens, ice_fsd_thd, a_ifsd, floe_ds
+   USE icefsd  , ONLY : fsd_peri_dens, ice_fsd_thd
    !
    USE in_out_manager , ONLY : numnam_ice_ref, numnam_ice_cfg, numout, numoni, lwp, lwm  ! I/O manager
    USE lib_mpp        , ONLY : ctl_stop, ctl_warn, ctl_nam                               ! MPP library

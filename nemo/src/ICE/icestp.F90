@@ -144,9 +144,9 @@ CONTAINS
             ! in routine store_fields (i.e., they are only really at 'before time step' before thd).
             ! For want of better names, I have defined a_i_b0 and a_ifsd_b0 as the values 'truly before',
             ! i.e., at the start of the time step. See usage in diag_trends (sent to ice_fsd_dia to write
-            ! FSD total tendency variables).
-            a_i_b0   (:,:,:)   = a_i   (:,:,:)
-            a_ifsd_b0(:,:,:,:) = a_ifsd(:,:,:,:)
+            ! FSD total tendency variables). -Jake
+            a_i_b0   (A2D(0),:)   = a_i   (A2D(0),:)
+            a_ifsd_b0(A2D(0),:,:) = a_ifsd(A2D(0),:,:)
          ENDIF
          !
 #if defined key_agrif
@@ -301,13 +301,9 @@ CONTAINS
       !
       CALL ice_itd_init                ! ice thickness distribution initialization
       !
-      CALL ice_thd_init                ! set ice thermodynics parameters (clem: important to call it first for melt ponds)
+      CALL ice_fsd_init                ! floe size distribution initialization (jake: must be before ice_istate_init)
       !
-      CALL ice_fsd_init                ! set ice floe-size distribution parameters
-      !                                !    Must come before ice_istate_init, ice_rst_read, and ice_dyn_init
-      !                                !    This initialises FSD variables, sets number of FSD categories, and initial FSD
-      !                                !    option from namelist &namfsd
-      !                                !    Advection routines need number of FSD categories
+      CALL ice_thd_init                ! set ice thermodynamics parameters (clem: important to call it first for melt ponds)
       !
       CALL ice_sbc_init                ! set ice-ocean and ice-atm. coupling parameters
       !
@@ -321,8 +317,7 @@ CONTAINS
       CALL ice_var_agg(1)
       !
       !
-      CALL ice_wav_init                ! set wave-ice interaction module parameters
-      !                                ! (this must come after ice_fsd_init)
+      CALL ice_wav_init                ! set wave-ice interaction module parameters (must be after ice_fsd_init)
       !
       CALL ice_dyn_init                ! set ice dynamics parameters
       !
@@ -361,8 +356,8 @@ CONTAINS
       !!-------------------------------------------------------------------
       INTEGER  ::   ios                 ! Local integer
       !!
-      NAMELIST/nampar/ jpl, nlay_i, nlay_s, ln_virtual_itd, ln_icedyn, ln_icethd, rn_amax_n, rn_amax_s,  &
-         &             cn_icerst_in, cn_icerst_indir, cn_icerst_out, cn_icerst_outdir
+      NAMELIST/nampar/ jpl, jpf, nlay_i, nlay_s, ln_virtual_itd, ln_fsd, ln_icedyn, ln_icethd, &
+         &             rn_amax_n, rn_amax_s, cn_icerst_in, cn_icerst_indir, cn_icerst_out, cn_icerst_outdir
       !!-------------------------------------------------------------------
       !
       READ_NML_REF(numnam_ice,nampar)
@@ -374,10 +369,12 @@ CONTAINS
          WRITE(numout,*) '   par_init: ice parameters shared among all the routines'
          WRITE(numout,*) '   ~~~~~~~~'
          WRITE(numout,*) '      Namelist nampar: '
-         WRITE(numout,*) '         number of ice  categories                           jpl       = ', jpl
+         WRITE(numout,*) '         number of ice thickness categories                  jpl       = ', jpl
+         WRITE(numout,*) '         number of ice floe size categories (ln_fsd=T)       jpf       = ', jpf
          WRITE(numout,*) '         number of ice  layers                               nlay_i    = ', nlay_i
          WRITE(numout,*) '         number of snow layers                               nlay_s    = ', nlay_s
          WRITE(numout,*) '         virtual ITD param for jpl=1 (T) or not (F)     ln_virtual_itd = ', ln_virtual_itd
+         WRITE(numout,*) '         use floe size distribution  (T) or not (F)     ln_fsd         = ', ln_fsd
          WRITE(numout,*) '         Ice dynamics       (T) or not (F)                   ln_icedyn = ', ln_icedyn
          WRITE(numout,*) '         Ice thermodynamics (T) or not (F)                   ln_icethd = ', ln_icethd
          WRITE(numout,*) '         maximum ice concentration for NH                              = ', rn_amax_n

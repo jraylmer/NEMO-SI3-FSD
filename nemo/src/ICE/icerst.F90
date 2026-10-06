@@ -22,7 +22,7 @@ MODULE icerst
    USE oce     , ONLY : ts                          ! SAS ss[st]_m init
    USE eosbn2  , ONLY : l_useCT, eos_pt_from_ct     ! SAS ss[st]_m init
    USE iceistate      ! sea-ice: initial state
-   USE icefsd  , ONLY : a_ifsd, ice_fsd_istate      ! floe size distribution variable and state-initialisation routine
+   USE icefsd  , ONLY : ice_fsd_istate              ! floe size distribution routine
    !
    Use in_out_manager ! I/O manager
    USE iom            ! I/O manager library
@@ -178,7 +178,7 @@ CONTAINS
       ! Floe size distribution (optional)
       IF( ln_fsd ) THEN
          ! treat floe size categories as 'layers' (analogous to e_s, for instance)
-         DO jk = 1, nn_nfsd
+         DO jk = 1, jpf
             WRITE(zchar1,'(I2.2)') jk
             znam = 'a_ifsd'//'_l'//zchar1
             z3d(:,:,:) = a_ifsd(:,:,jk,:)
@@ -375,8 +375,8 @@ CONTAINS
             ENDDO
             ! only use if correct number of categories present in restart
             ! (we do not/cannot check the actual category bounds are consistent)
-            IF( id_nfsd == nn_nfsd ) THEN
-               DO jk = 1, nn_nfsd
+            IF( id_nfsd == jpf ) THEN
+               DO jk = 1, jpf
                   WRITE(zchar1,'(I2.2)') jk
                   znam = 'a_ifsd'//'_l'//zchar1
                   CALL iom_get( numrir, jpdom_auto, znam, z3d )

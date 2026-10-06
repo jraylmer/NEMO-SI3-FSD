@@ -23,11 +23,13 @@
 !------------------------------------------------------------------------------
 &nampar         !   Generic parameters
 !------------------------------------------------------------------------------
-   jpl              =   5             !  number of ice  categories
+   jpl              =   5             !  number of ice thickness categories
+   jpf              =  12             !  number of ice floe size categories (ln_fsd=T)
    nlay_i           =  10             !  number of ice  layers
    nlay_s           =   5             !  number of snow layers
-   ln_virtual_itd   =   .false.       !  virtual ITD mono-category parameterization (jpl=1 only)
+   ln_virtual_itd   = .false.         !  virtual ITD mono-category parameterization (jpl=1 only)
                                       !     i.e. enhanced thermal conductivity & virtual thin ice melting
+   ln_fsd           = .false.         !  use floe size distribution (T => fill namfsd) or not (F)
    ln_icedyn        = .true.          !  ice dynamics (T) or not (F)
    ln_icethd        = .true.          !  ice thermo   (T) or not (F)
    rn_amax_n        =   0.997         !  maximum tolerated ice concentration NH
@@ -326,19 +328,17 @@
       jiceprt       =  10             !     j-index for debug
 /
 !------------------------------------------------------------------------------
-&namfsd         ! floe size distribution
+&namfsd         ! floe size distribution (ln_fsd=T)
 !------------------------------------------------------------------------------
-   ln_fsd           = .false.         ! use FSD (T) or not (F)
                    ! -- category def. --!
      nn_fsd_catini    = 2               ! option for FSD category limits ('floe size' = mean caliper diameter):
-                                        !   0   = user defined (read first nn_nfsd+1 values from rn_fsd_catbnd below)
-                                        !   1-3 = calculate nn_nfsd categories between nn_fsd_smin and nn_fsd_smax (below) such that:
+                                        !   0   = user defined (read first jpf+1 values from rn_fsd_catbnd below)
+                                        !   1-3 = calculate jpf categories between nn_fsd_smin and nn_fsd_smax (below) such that:
                                         !     1 =   spacing is uniform (equal-width categories)
                                         !     2 =   spacing follows Gaussian profile (recommended for floe size range ~  1km)
                                         !     3 =   spacing increases exponentially  (recommended for floe size range ~ 10km)
                                         !   Note: categories are printed in ocean.output for checking
                                         !
-       nn_nfsd          = 12            !   number of floe size distribution categories
        rn_fsd_smin      = 0.1           !   smallest floe size (diameter; m)
        rn_fsd_smax      = 1000.         !   largest  floe size (diameter; m)
        rn_fsd_spc       = 1.            !   non-linearity adjustment, nn_fsd_catini = 2 or 3 (> 0, ~1)
@@ -371,7 +371,7 @@
 &namwav         ! wave-ice interactions
 !------------------------------------------------------------------------------
    ln_ice_wav       = .false.         ! activate wave-ice interactions (T) or not (F)
-                                      ! (note: if T, also need ln_fsd=T in namfsd and ln_wave=T in namsbc)
+                                      ! (note: if T, also need ln_fsd=T in nampar and ln_wave=T in namsbc)
                    ! -- input/config  -- !
       ln_ice_wav_spec = .false.          ! read full wave energy spectrum from wave model or forcing
                    ! -- attenuation   -- !

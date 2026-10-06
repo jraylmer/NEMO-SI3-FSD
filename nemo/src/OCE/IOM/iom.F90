@@ -29,7 +29,7 @@ MODULE iom
    USE sbc_oce  , ONLY :   nn_fsbc, ght_abl, ghw_abl, e3t_abl, e3w_abl, jpka, jpkam1
    USE icb_oce  , ONLY :   basicb_num, nclasses, class_num       !  !: iceberg classes
 #if defined key_si3
-   USE par_ice  , ONLY :   jpl, nlay_i, nn_nfsd
+   USE par_ice  , ONLY :   jpl, jpf, nlay_i
 #endif
    USE phycst          ! physical constants
    USE dianam          ! build name of file
@@ -248,7 +248,7 @@ CONTAINS
 # if defined key_si3
          CALL iom_set_axis_attr( "ncatice", (/ (REAL(ji,wp), ji=1,jpl   ) /) )
          CALL iom_set_axis_attr( "nlayice", (/ (REAL(ji,wp), ji=1,nlay_i) /) )
-         CALL iom_set_axis_attr( "nfsdice", (/ (REAL(ji,wp), ji=1,nn_nfsd) /) )
+         CALL iom_set_axis_attr( "nfsdice", (/ (REAL(ji,wp), ji=1,jpf)    /) )
          CALL iom_duplicate_grid( 'grid_T_ncatice', 'grid_T', (/          'ncatice'/) )
          CALL iom_duplicate_grid( 'grid_T_nlayice', 'grid_T', (/'nlayice','ncatice'/) )
          CALL iom_duplicate_grid( 'grid_T_fsd'    , 'grid_T', (/'nfsdice'          /) )

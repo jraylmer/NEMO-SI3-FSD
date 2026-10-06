@@ -11,12 +11,12 @@ MODULE icefrm
    !!   'key_si3'                                       SI3 sea-ice model
    !!----------------------------------------------------------------------
    USE par_ice
-   USE ice   , ONLY : a_i, at_i, at_ip, vt_i, vt_s, drag_io, drag_ia           ! sea-ice variables
-   USE icefsd, ONLY : a_ifsd, floe_size_dist, fsd_eff_size                     ! floe size distribution
+   USE ice   , ONLY : a_i, at_i, at_ip, vt_i, vt_s, a_ifsd, drag_io, drag_ia   ! sea-ice variables
+   USE icefsd, ONLY : floe_size_dist, fsd_eff_size                             ! floe size distribution functions
    USE in_out_manager       ! I/O manager
    USE iom                  ! for iom_put
    USE timing               ! timing
-   USE phycst                ! physical constants
+   USE phycst               ! physical constants
    USE sbcblk , ONLY : nn_frm, rn_Cs_io, rn_Cs_ia, rn_Cr_ia, rn_Cr_io, rn_Cf_ia, rn_Cf_io   ! Form Drag params
 
    IMPLICIT NONE

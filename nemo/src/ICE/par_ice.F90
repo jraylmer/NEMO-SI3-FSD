@@ -18,10 +18,12 @@ MODULE par_ice
    !!                   shared namelist parameters
    !!----------------------------------------------------------------------
    !                                     !!** ice-generic parameters namelist (nampar) **
-   INTEGER           , PUBLIC ::   jpl              !: number of ice  categories
+   INTEGER           , PUBLIC ::   jpl              !: number of ice thickness categories
+   INTEGER           , PUBLIC ::   jpf              !: number of ice floe size categories (ln_fsd=T)
    INTEGER           , PUBLIC ::   nlay_i           !: number of ice  layers
    INTEGER           , PUBLIC ::   nlay_s           !: number of snow layers
    LOGICAL           , PUBLIC ::   ln_virtual_itd   !: virtual ITD mono-category parameterization (T) or not (F)
+   LOGICAL           , PUBLIC ::   ln_fsd           !: use floe size distribution (T) or not (F)
    LOGICAL           , PUBLIC ::   ln_icedyn        !: flag for ice dynamics (T) or not (F)
    LOGICAL           , PUBLIC ::   ln_icethd        !: flag for ice thermo   (T) or not (F)
    REAL(wp)          , PUBLIC ::   rn_amax_n        !: maximum ice concentration Northern hemisphere
@@ -113,8 +115,6 @@ MODULE par_ice
    REAL(wp), PUBLIC ::   rdiag_v, rdiag_s, rdiag_t, rdiag_fv, rdiag_fs, rdiag_ft !: conservation diagnostics
    
    !                                     !!** ice-floe size distribution namelist (namfsd)
-   LOGICAL , PUBLIC ::   ln_fsd           !: Use FSD (T) or not (F)
-   INTEGER , PUBLIC ::   nn_nfsd          !: Number of floe-size categories
    REAL(wp), PUBLIC ::   rn_floeshape     !: Floe shape parameter (dimensionless)
    LOGICAL , PUBLIC ::   ln_fsd_brit      !: Activate FSD brittle fractue scheme or not
 

@@ -25,7 +25,7 @@ MODULE icethd_do
    USE icevar  , ONLY : ice_var_vremap
    USE icethd_sal     ! sea-ice: salinity profiles
    USE icefsd  , ONLY : ice_fsd_part_newice, ice_fsd_add_newice, ice_fsd_thd, ice_fsd_weld, ice_fsd_dia
-   USE icefsd  , ONLY : a_ifsd, nf_newice
+   USE icefsd  , ONLY : nf_newice
    USE icewav  , ONLY : ice_wav_newice
    USE in_out_manager ! I/O manager
    USE lib_mpp        ! MPP library
@@ -114,12 +114,12 @@ CONTAINS
       REAL(wp)                 ::   zG_s            ! floe lateral growth rate (ds/dt; units: m/s)
       INTEGER                  ::   jcat_fsd        ! new ice floe size category
       !
-      REAL(wp), DIMENSION(A2D(0),nn_nfsd,jpl) ::   za_ifsdb_latgro   ! a_ifsd before lateral growth, for diagnostics
-      REAL(wp), DIMENSION(A2D(0),nn_nfsd,jpl) ::   za_ifsda_latgro   ! "      after  lateral growth  "
-      REAL(wp), DIMENSION(A2D(0),nn_nfsd,jpl) ::   za_ifsda_newice   ! "      after  new ice growth  "
-      REAL(wp), DIMENSION(A2D(0),jpl)         ::   za_ib_latgro      ! a_i before lateral growth, for diagnostics
-      REAL(wp), DIMENSION(A2D(0),jpl)         ::   za_ia_latgro      ! "   after  lateral growth  "
-      REAL(wp), DIMENSION(A2D(0),jpl)         ::   za_ia_newice      ! "   after  new ice growth  "
+      REAL(wp), DIMENSION(A2D(0),jpf,jpl) ::   za_ifsdb_latgro   ! a_ifsd before lateral growth, for diagnostics
+      REAL(wp), DIMENSION(A2D(0),jpf,jpl) ::   za_ifsda_latgro   ! "      after  lateral growth  "
+      REAL(wp), DIMENSION(A2D(0),jpf,jpl) ::   za_ifsda_newice   ! "      after  new ice growth  "
+      REAL(wp), DIMENSION(A2D(0),jpl)     ::   za_ib_latgro      ! a_i before lateral growth, for diagnostics
+      REAL(wp), DIMENSION(A2D(0),jpl)     ::   za_ia_latgro      ! "   after  lateral growth  "
+      REAL(wp), DIMENSION(A2D(0),jpl)     ::   za_ia_newice      ! "   after  new ice growth  "
       !!-----------------------------------------------------------------------!
       !
       IF( ln_timing    )   CALL timing_start('icethd_do')

@@ -28,7 +28,7 @@ MODULE icethd
    USE icethd_do      ! sea-ice: growth in open water
    USE icethd_pnd     ! sea-ice: melt ponds
    USE iceitd  , ONLY : ice_itd_rem
-   USE icefsd  , ONLY : a_ifsd, ice_fsd_dia
+   USE icefsd  , ONLY : ice_fsd_dia
    USE icecor         ! sea-ice: corrections
    USE icectl         ! sea-ice: control print
    !
@@ -90,8 +90,8 @@ CONTAINS
       !
       REAL(wp), DIMENSION(A2D(0)) ::   zevap_rema   ! remaining of evaporation after snow sublimation (in kg/m2)
       !
-      REAL(wp), DIMENSION(A2D(0),nn_nfsd,jpl) ::   za_ifsdb_da   ! FSD before lateral melt for FSD diagnostics
-      REAL(wp), DIMENSION(A2D(0),jpl)         ::   za_ib_da      ! a_i before lateral melt for FSD diagnostics
+      REAL(wp), DIMENSION(A2D(0),jpf,jpl) ::   za_ifsdb_da   ! FSD before lateral melt for FSD diagnostics
+      REAL(wp), DIMENSION(A2D(0),jpl)     ::   za_ib_da      ! a_i before lateral melt for FSD diagnostics
       !
       INTEGER ::   ji, jj, jk, jl   ! dummy loop indices
       !!-------------------------------------------------------------------

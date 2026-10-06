@@ -22,8 +22,8 @@ MODULE icedyn
    USE icecor         ! sea-ice: corrections
    USE icevar  , ONLY : ice_var_zapsmall
    USE icectl         ! sea-ice: control prints
-   USE icefsd  , ONLY : a_ifsd, ice_fsd_brit   ! sea-ice: floe size distribution
-   USE icewav  , ONLY : ice_wav_frac           ! wave-ice interactions
+   USE icefsd  , ONLY : ice_fsd_brit
+   USE icewav  , ONLY : ice_wav_frac
    !
    USE in_out_manager ! I/O manager
    USE iom            ! I/O manager library

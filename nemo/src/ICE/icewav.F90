@@ -32,7 +32,7 @@ MODULE icewav
    USE sbc_oce, ONLY :   wndm, ln_wave, ln_wave_spec, nn_nwfreq            ! SBC module
    USE sbcwave           ! SBC wave variables
    USE ice               ! sea-ice: variables
-   USE icefsd , ONLY :   a_ifsd, nf_newice, floe_sl, floe_sc, floe_su, floe_ds     ! floe size distribution parameters/variables
+   USE icefsd , ONLY :   nf_newice                                                 ! floe size distribution parameters/variables
    USE icefsd , ONLY :   ice_fsd_tstep, ice_fsd_cor, ice_fsd_dia, floe_size_dist   ! floe size distribution functions/routines
 
    USE in_out_manager    ! I/O manager (needed for lwm and lwp logicals)
@@ -275,7 +275,7 @@ CONTAINS
             ! Find FSD category that s_max belongs to. Note that if s_max exceeds upper
             ! limit of largest floe size category, it goes into that category anyway:
             !
-            DO jf = nn_nfsd, 1, -1
+            DO jf = jpf, 1, -1
                IF( zsmax > floe_sl(jf) ) THEN
                   kcat = jf
                   EXIT   ! found kcat => stop iterating
@@ -415,7 +415,7 @@ CONTAINS
 
             ! Mean floe diameter:
             zdmean = 0._wp
-            DO jf = 1, nn_nfsd
+            DO jf = 1, jpf
                DO jl = 1, jpl
                   zdmean = zdmean + floe_sc(jf) * a_i(ji,jj,jl) * a_ifsd(ji,jj,jf,jl)
                ENDDO
@@ -723,27 +723,27 @@ CONTAINS
       !!
       !!-------------------------------------------------------------------
       !
-      INTEGER , INTENT(in)                    ::   kt                   ! ocean time step
+      INTEGER , INTENT(in)                ::   kt                   ! ocean time step
       !
-      REAL(wp), DIMENSION(A2D(0),nn_nfsd,jpl) ::   za_ifsdb             ! a_ifsd before fracture (for diagnostics)
+      REAL(wp), DIMENSION(A2D(0),jpf,jpl) ::   za_ifsdb             ! a_ifsd before fracture (for diagnostics)
       !
-      REAL(wp), DIMENSION(nn_nfsd,nn_nfsd)    ::   zBfrac               ! fracture redistribution function B(s',s)ds
-      REAL(wp), DIMENSION(nn_nfsd)            ::   zQfrac               ! fracture probability function (s-1)
-      REAL(wp), DIMENSION(nn_nfsd)            ::   za_ifsd_tend         ! tendency of FSD due to wave fracture
-      REAL(wp)                                ::   zh_i                 ! mean ice thickness
-      REAL(wp)                                ::   zfsd_res             ! correction term for area conservation
-      REAL(wp)                                ::   zt_elapsed           ! time elapsed during adaptive time stepping (units: s)
-      INTEGER                                 ::   isubt                ! number of iterations used in adaptive time stepping
-      INTEGER                                 ::   ji, jj, jl, jf       ! dummy loop indices
+      REAL(wp), DIMENSION(jpf,jpf)        ::   zBfrac               ! fracture redistribution function B(s',s)ds
+      REAL(wp), DIMENSION(jpf)            ::   zQfrac               ! fracture probability function (s-1)
+      REAL(wp), DIMENSION(jpf)            ::   za_ifsd_tend         ! tendency of FSD due to wave fracture
+      REAL(wp)                            ::   zh_i                 ! mean ice thickness
+      REAL(wp)                            ::   zfsd_res             ! correction term for area conservation
+      REAL(wp)                            ::   zt_elapsed           ! time elapsed during adaptive time stepping (units: s)
+      INTEGER                             ::   isubt                ! number of iterations used in adaptive time stepping
+      INTEGER                             ::   ji, jj, jl, jf       ! dummy loop indices
       !
-      !                                                                 ! --  Z16 scheme only -- !
-      REAL(wp)                                ::   z1mfetch, znumcell   ! for local fetch parameter calculation
-      INTEGER                                 ::   jx, jy               ! more dummy loop indices
+      !                                                             ! --  Z16 scheme only -- !
+      REAL(wp)                            ::   z1mfetch, znumcell   ! for local fetch parameter calculation
+      INTEGER                             ::   jx, jy               ! more dummy loop indices
       !
-      !                                                                 ! -- HT15 scheme only -- !
-      INTEGER                                 ::   zstat, znumfrac      ! to track how often convergence not reached
+      !                                                             ! -- HT15 scheme only -- !
+      INTEGER                             ::   zstat, znumfrac      ! to track how often convergence not reached
       !
-      REAL(wp), PARAMETER                     ::   zat_i_min = .01_wp   ! minimum concentration for fracture to occur
+      REAL(wp), PARAMETER                 ::   zat_i_min = .01_wp   ! minimum concentration for fracture to occur
       !
       !!-------------------------------------------------------------------
 
@@ -874,7 +874,7 @@ CONTAINS
                         IF( a_ifsd(ji,jj,1,jl) >= 1._wp - epsi10 ) EXIT
                         !
                         ! Calculate FSD tendency due to wave fracture:
-                        DO jf = 1, nn_nfsd
+                        DO jf = 1, jpf
                            za_ifsd_tend(jf) = SUM( zBfrac(:,jf) * zQfrac(:) * a_ifsd(ji,jj,:,jl) )   &
                               &               - zQfrac(jf) * a_ifsd(ji,jj,jf,jl)
                         ENDDO
@@ -904,7 +904,7 @@ CONTAINS
                      IF( zfsd_res <= 0._wp ) THEN
                         a_ifsd(ji,jj,1,jl) = a_ifsd(ji,jj,1,jl) + ABS(zfsd_res)
                      ELSE
-                        DO jf = nn_nfsd, 1, -1
+                        DO jf = jpf, 1, -1
                            IF( a_ifsd(ji,jj,jf,jl) > zfsd_res) THEN
                               a_ifsd(ji,jj,jf,jl) = a_ifsd(ji,jj,jf,jl) - ABS(zfsd_res)
                               EXIT
@@ -979,15 +979,15 @@ CONTAINS
       !!                other floe size s < s'. This 'unifom redistributor' is calculated in
       !!                subroutine ice_wav_init as it is a constant.
       !!
-      !! ** Inputs  :   puatm                   :   local wind speed (m/s)
-      !!                ph_i                    :   local mean ice thickness (m)
-      !!                p1mfetch                :   1 minus local fetch parameter
-      !!                pfsd                    :   floe size distribution, f(s)ds
+      !! ** Inputs  :   puatm           :   local wind speed (m/s)
+      !!                ph_i            :   local mean ice thickness (m)
+      !!                p1mfetch        :   1 minus local fetch parameter
+      !!                pfsd            :   floe size distribution, f(s)ds
       !!
-      !! ** Outputs :   pQfrac(nn_nfsd)         :   fracture probability function (s-1)
-      !!                pBfrac(nn_nfsd,nn_nfsd) :   fracture redistribution function, B(s',s)ds
-      !!                                            (note: first  index corresponds to original floe size s',
-      !!                                                   second index corresponds to fractured floe size s)
+      !! ** Outputs :   pQfrac(jpf)     :   fracture probability function (s-1)
+      !!                pBfrac(jpf,jpf) :   fracture redistribution function, B(s',s)ds
+      !!                                    (note: first  index corresponds to original floe size s',
+      !!                                           second index corresponds to fractured floe size s)
       !!
       !! ** Callers :   ice_wav_frac --> [wav_frac_z16]
       !!
@@ -1007,16 +1007,16 @@ CONTAINS
       !!              Elementa, 4(000126)
       !!-------------------------------------------------------------------
       !
-      REAL(wp)                            , INTENT(in)    ::   puatm     ! local near-surface wind speed (m/s)
-      REAL(wp)                            , INTENT(in)    ::   ph_i      ! local mean sea ice thickness (m)
-      REAL(wp)                            , INTENT(in)    ::   p1mfetch  ! 1 minus fetch parameter
-      REAL(wp), DIMENSION(nn_nfsd)        , INTENT(in)    ::   pfsd      ! floe size distribution, f(s)ds
-      REAL(wp), DIMENSION(nn_nfsd)        , INTENT(inout) ::   pQfrac    ! wave fracture probability function (s-1)
-      REAL(wp), DIMENSION(nn_nfsd,nn_nfsd), INTENT(inout) ::   pBfrac    ! wave fracture redistribution function, B(s',s)ds
+      REAL(wp)                    , INTENT(in)    ::   puatm     ! local near-surface wind speed (m/s)
+      REAL(wp)                    , INTENT(in)    ::   ph_i      ! local mean sea ice thickness (m)
+      REAL(wp)                    , INTENT(in)    ::   p1mfetch  ! 1 minus fetch parameter
+      REAL(wp), DIMENSION(jpf)    , INTENT(in)    ::   pfsd      ! floe size distribution, f(s)ds
+      REAL(wp), DIMENSION(jpf)    , INTENT(inout) ::   pQfrac    ! wave fracture probability function (s-1)
+      REAL(wp), DIMENSION(jpf,jpf), INTENT(inout) ::   pBfrac    ! wave fracture redistribution function, B(s',s)ds
       !
-      REAL(wp)                                            ::   zsavg     ! mean floe size
-      REAL(wp)                                            ::   zc_b      ! participation factor
-      INTEGER                                             ::   jf, jl    ! dummy loop index
+      REAL(wp)                                    ::   zsavg     ! mean floe size
+      REAL(wp)                                    ::   zc_b      ! participation factor
+      INTEGER                                     ::   jf, jl    ! dummy loop index
       !
       !!-------------------------------------------------------------------
 
@@ -1029,17 +1029,17 @@ CONTAINS
          !
          ! Mean floe size:
          zsavg = 0._wp
-         DO jf = 1, nn_nfsd
+         DO jf = 1, jpf
             zsavg = zsavg + floe_sc(jf) * pfsd(jf)
          ENDDO
          !
-         zc_b = EXP( -rn_z16_a * p1mfetch - rn_z16_b * (1._wp - zsavg / floe_sc(nn_nfsd)) )
+         zc_b = EXP( -rn_z16_a * p1mfetch - rn_z16_b * (1._wp - zsavg / floe_sc(jpf)) )
          zc_b = zc_b * rn_z16_k * puatm * rDt_ice / MAX( ph_i, rn_z16_hc )
       ENDIF
 
       ! --- Calculate source terms --- !
-      DO jf = 1, nn_nfsd
-         pQfrac(jf) = MAX( 0._wp, 1._wp - SUM(pfsd(jf:nn_nfsd)) / zc_b ) * r1_Dt_ice
+      DO jf = 1, jpf
+         pQfrac(jf) = MAX( 0._wp, 1._wp - SUM(pfsd(jf:jpf)) / zc_b ) * r1_Dt_ice
       ENDDO
 
       pBfrac(:,:) = Bfrac_uni(:,:)   ! uniform redistribution
@@ -1081,14 +1081,14 @@ CONTAINS
       !!                other floe size s < s'. This 'uniform redistributor' is calculated in
       !!                subroutine ice_wav_init as it is a constant.
       !!
-      !! ** Inputs  :   phsw                    :   local significant wave height (m)
-      !!                pwmp                    :   local wave mean period (s)
-      !!                ph_i                    :   local (grid cell) mean sea ice thickness (m)
+      !! ** Inputs  :   phsw            :   local significant wave height (m)
+      !!                pwmp            :   local wave mean period (s)
+      !!                ph_i            :   local (grid cell) mean sea ice thickness (m)
       !!
-      !! ** Outputs :   pQfrac(nn_nfsd)         :   fracture probability function (s-1)
-      !!                pBfrac(nn_nfsd,nn_nfsd) :   fracture redistribution function, B(s',s)ds
-      !!                                            (note: first  index corresponds to original floe size s',
-      !!                                                   second index corresponds to fractured floe size s)
+      !! ** Outputs :   pQfrac(jpf)     :   fracture probability function (s-1)
+      !!                pBfrac(jpf,jpf) :   fracture redistribution function, B(s',s)ds
+      !!                                    (note: first  index corresponds to original floe size s',
+      !!                                           second index corresponds to fractured floe size s)
       !!
       !! ** Callers :   ice_wav_frac --> [wav_frac_y24a]
       !!
@@ -1101,14 +1101,14 @@ CONTAINS
       !!
       !!-------------------------------------------------------------------
       !
-      REAL(wp)                            , INTENT(in)    ::   phsw     ! grid cell significant wave height (m)
-      REAL(wp)                            , INTENT(in)    ::   pwmp     ! grid cell wave mean period (s)
-      REAL(wp)                            , INTENT(in)    ::   ph_i     ! grid cell mean ice thickness (m)
-      REAL(wp), DIMENSION(nn_nfsd)        , INTENT(inout) ::   pQfrac   ! wave fracture probability function (s-1)
-      REAL(wp), DIMENSION(nn_nfsd,nn_nfsd), INTENT(inout) ::   pBfrac   ! wave fracture redistribution function, B(s',s)ds
+      REAL(wp)                    , INTENT(in)    ::   phsw     ! grid cell significant wave height (m)
+      REAL(wp)                    , INTENT(in)    ::   pwmp     ! grid cell wave mean period (s)
+      REAL(wp)                    , INTENT(in)    ::   ph_i     ! grid cell mean ice thickness (m)
+      REAL(wp), DIMENSION(jpf)    , INTENT(inout) ::   pQfrac   ! wave fracture probability function (s-1)
+      REAL(wp), DIMENSION(jpf,jpf), INTENT(inout) ::   pBfrac   ! wave fracture redistribution function, B(s',s)ds
       !
-      INTEGER             ::   jf                ! dummy loop indices
-      REAL(wp)            ::   zstrain           ! ice strain due to waves
+      INTEGER  ::   jf                ! dummy loop indices
+      REAL(wp) ::   zstrain           ! ice strain due to waves
       !
       !!-------------------------------------------------------------------
 
@@ -1117,9 +1117,9 @@ CONTAINS
       IF( (phsw >= minhsw) .AND. (pwmp >= minwmp) ) THEN                 ! <-- sufficient wave presence
          zstrain = 2.5_wp * rpi**4 * ph_i * phsw / (grav**2 * pwmp**4)   ! <-- strain experienced by ice
          IF( zstrain >= rn_ice_wav_ecri ) THEN
-            DO jf = 1, nn_nfsd
+            DO jf = 1, jpf
                pQfrac(jf) = rn_y24a_cw * r1_Dt_ice   &
-                  &                    * EXP( -rn_y24a_alpha * (1._wp - floe_sc(jf) / floe_sc(nn_nfsd)) )
+                  &                    * EXP( -rn_y24a_alpha * (1._wp - floe_sc(jf) / floe_sc(jpf)) )
             ENDDO
          ENDIF
       ENDIF
@@ -1162,14 +1162,14 @@ CONTAINS
       !
       !!-------------------------------------------------------------------
 
-      ALLOCATE( wgtQ_y24b(nn_nwfreq,nn_nfsd), wgtB_y24b(nn_nwfreq,nn_nfsd), STAT=ierr )
+      ALLOCATE( wgtQ_y24b(nn_nwfreq,jpf), wgtB_y24b(nn_nwfreq,jpf), STAT=ierr )
       IF( ierr /= 0 ) CALL ctl_stop('icewav: unable to allocate wgt{Q,B}_y24b array(s)')
 
       wgtQ_y24b(:,:) = 0._wp   ! initialise
       wgtB_y24b(:,:) = 0._wp   ! default value (most of this array will = 0 anyway)
 
       DO jw = 1, nn_nwfreq
-         DO jf = 1, nn_nfsd
+         DO jf = 1, jpf
             !
             ! --- Compute weights for Q(s) --- !
             !
@@ -1292,14 +1292,14 @@ CONTAINS
       !!                category, which are 0, 1, or somewhere between (accounting for partial fulfillment
       !!                of the conditions sub-category).
       !!
-      !! ** Inputs  :   pwmp                    :   local wave mean period (s)
-      !!                pWspec(nn_nwfreq)       :   local wave spectrum (spectral energy density; m2.Hz-1)
-      !!                ph_i                    :   local (grid cell) mean sea ice thickness (m)
+      !! ** Inputs  :   pwmp              :   local wave mean period (s)
+      !!                pWspec(nn_nwfreq) :   local wave spectrum (spectral energy density; m2.Hz-1)
+      !!                ph_i              :   local (grid cell) mean sea ice thickness (m)
       !!
-      !! ** Outputs :   pQfrac(nn_nfsd)         :   fracture probability function (s-1)
-      !!                pBfrac(nn_nfsd,nn_nfsd) :   fracture redistribution function, B(s',s)ds
-      !!                                            (note: first  index corresponds to original floe size s',
-      !!                                                   second index corresponds to fractured floe size s)
+      !! ** Outputs :   pQfrac(jpf)       :   fracture probability function (s-1)
+      !!                pBfrac(jpf,jpf)   :   fracture redistribution function, B(s',s)ds
+      !!                                      (note: first  index corresponds to original floe size s',
+      !!                                             second index corresponds to fractured floe size s)
       !!
       !! ** Callers :   ice_wav_frac --> [wav_frac_y24b]
       !!
@@ -1312,17 +1312,17 @@ CONTAINS
       !!
       !!-------------------------------------------------------------------
       !
-      REAL(wp)                            , INTENT(in)    ::   pwmp     ! grid cell wave mean period (s)
-      REAL(wp)                            , INTENT(in)    ::   ph_i     ! grid cell mean ice thickness (m)
-      REAL(wp), DIMENSION(nn_nwfreq)      , INTENT(in)    ::   pWspec   ! local wave spectral energy density (m2.Hz-1)
-      REAL(wp), DIMENSION(nn_nfsd)        , INTENT(inout) ::   pQfrac   ! wave fracture probability function (s-1)
-      REAL(wp), DIMENSION(nn_nfsd,nn_nfsd), INTENT(inout) ::   pBfrac   ! wave fracture redistribution function, B(s',s)ds
+      REAL(wp)                      , INTENT(in)    ::   pwmp     ! grid cell wave mean period (s)
+      REAL(wp)                      , INTENT(in)    ::   ph_i     ! grid cell mean ice thickness (m)
+      REAL(wp), DIMENSION(nn_nwfreq), INTENT(in)    ::   pWspec   ! local wave spectral energy density (m2.Hz-1)
+      REAL(wp), DIMENSION(jpf)      , INTENT(inout) ::   pQfrac   ! wave fracture probability function (s-1)
+      REAL(wp), DIMENSION(jpf,jpf)  , INTENT(inout) ::   pBfrac   ! wave fracture redistribution function, B(s',s)ds
       !
-      INTEGER                        ::   jf1, jf2, jw   ! dummy loop indices
-      REAL(wp), DIMENSION(nn_nwfreq) ::   zamp           ! spectral amplitudes (m)
-      REAL(wp), DIMENSION(nn_nwfreq) ::   zstrain        ! ice strain due to waves per spectral class
-      REAL(wp), DIMENSION(nn_nwfreq) ::   zprayl         ! Rayleigh spectrum (Hz-1)
-      REAL(wp), DIMENSION(nn_nwfreq) ::   zprob          ! probability of fracturing per spectral class
+      INTEGER                        ::   j1, j2, jw   ! dummy loop indices
+      REAL(wp), DIMENSION(nn_nwfreq) ::   zamp         ! spectral amplitudes (m)
+      REAL(wp), DIMENSION(nn_nwfreq) ::   zstrain      ! ice strain due to waves per spectral class
+      REAL(wp), DIMENSION(nn_nwfreq) ::   zprayl       ! Rayleigh spectrum (Hz-1)
+      REAL(wp), DIMENSION(nn_nwfreq) ::   zprob        ! probability of fracturing per spectral class
       !
       !!-------------------------------------------------------------------
 
@@ -1338,30 +1338,30 @@ CONTAINS
       pQfrac(:)   = 0._wp
       pBfrac(:,:) = 0._wp
 
-      DO jf1 = 1, nn_nfsd
+      DO j1 = 1, jpf
          DO jw = 1, nn_nwfreq
             !
-            ! Update Q(s) <==> pQfrac(jf1) (note dL is already implicitly multipled into zprob):
+            ! Update Q(s) <==> pQfrac(j1) (note dL is already implicitly multipled into zprob):
             !
-            ! Weight factor wgtQ_y24b is fraction of spectral class jw/floe size category jf
+            ! Weight factor wgtQ_y24b(jw,j1) is fraction of spectral class jw/floe size category j1
             ! for which the condition for fracture (wavelength L < s') is satisfied:
-            pQfrac(jf1) = pQfrac(jf1) + wgtQ_y24b(jw,jf1) * zprob(jw)
+            pQfrac(j1) = pQfrac(j1) + wgtQ_y24b(jw,j1) * zprob(jw)
             !
-            ! Update B(s,r)dr <== > pBfrac(jf1,jf2):
+            ! Update B(s,r)dr <== > pBfrac(j1,j2):
             !
-            ! Weight factor wgtB_y24b is the fraction of spectral class jw width for which the
-            ! fracture size (s = L/2) is contained within the transferred floe size category jf2:
-            DO jf2 = 1, nn_nfsd
-                pBfrac(jf1,jf2) = pBfrac(jf1,jf2) +   wgtQ_y24b(jw,jf1) * zprob(jw)      &
-                   &                                * wgtB_y24b(jw,jf2) * floe_ds(jf2)
+            ! Weight factor wgtB_y24b(jw,j2) is the fraction of spectral class jw width for which the
+            ! fracture size (s = L/2) is contained within the transferred floe size category j2:
+            DO j2 = 1, jpf
+                pBfrac(j1,j2) = pBfrac(j1,j2) +   wgtQ_y24b(jw,j1) * zprob(jw)     &
+                   &                            * wgtB_y24b(jw,j2) * floe_ds(j2)
             ENDDO
          ENDDO
          !
          ! Normalise probability rate to time step (units -> s-1):
-         pQfrac(jf1) = pQfrac(jf1) * r1_Dt_ice
+         pQfrac(j1) = pQfrac(j1) * r1_Dt_ice
          !
          ! Ensure B(s',s)ds is normalised (integrates to 1):
-         IF( SUM(pBfrac(jf1,:)) > 0._wp ) pBfrac(jf1,:) = pBfrac(jf1,:) / SUM(pBfrac(jf1,:))
+         IF( SUM(pBfrac(j1,:)) > 0._wp ) pBfrac(j1,:) = pBfrac(j1,:) / SUM(pBfrac(j1,:))
          !
       ENDDO
 
@@ -1420,14 +1420,14 @@ CONTAINS
       !!                normalisation factor cancels in the expression for B so there are no explicit
       !!                factors of D.
       !!
-      !! ** Inputs  :   pWspec(nn_nwfreq)       :   local wave spectrum (spectral energy density; m2.Hz-1)
-      !!                ph_i                    :   local (grid cell) mean sea ice thickness (m)
-      !!                pstat                   :   integer, adds 1 to this if convergence is not reached
+      !! ** Inputs  :   pWspec(nn_nwfreq) :   local wave spectrum (spectral energy density; m2.Hz-1)
+      !!                ph_i              :   local (grid cell) mean sea ice thickness (m)
+      !!                pstat             :   integer, adds 1 to this if convergence is not reached
       !!
-      !! ** Outputs :   pQfrac(nn_nfsd)         :   fracture probability function (s-1)
-      !!                pBfrac(nn_nfsd,nn_nfsd) :   fracture redistribution function, B(s',s)ds
-      !!                                            (note: first  index corresponds to original floe size s',
-      !!                                                   second index corresponds to fractured floe size s)
+      !! ** Outputs :   pQfrac(jpf)       :   fracture probability function (s-1)
+      !!                pBfrac(jpf,jpf)   :   fracture redistribution function, B(s',s)ds
+      !!                                      (note: first  index corresponds to original floe size s',
+      !!                                             second index corresponds to fractured floe size s)
       !!
       !! ** Callers :   ice_wav_frac --> [wav_frac_ht15]
       !!
@@ -1442,28 +1442,28 @@ CONTAINS
       !!
       !!-------------------------------------------------------------------
       !
-      REAL(wp), DIMENSION(nn_nwfreq)      , INTENT(in)    ::   pWspec   ! local wave spectral energy density (m2.Hz-1)
-      REAL(wp)                            , INTENT(in)    ::   ph_i     ! grid cell mean ice thickness (m)
-      REAL(wp), DIMENSION(nn_nfsd)        , INTENT(inout) ::   pQfrac   ! wave fracture probability function (s-1)
-      REAL(wp), DIMENSION(nn_nfsd,nn_nfsd), INTENT(inout) ::   pBfrac   ! wave fracture redistribution function, B(s',s)ds
-      INTEGER                             , INTENT(inout) ::   pstat    ! counter for whether convergence reached or not
+      REAL(wp), DIMENSION(nn_nwfreq), INTENT(in)    ::   pWspec   ! local wave spectral energy density (m2.Hz-1)
+      REAL(wp)                      , INTENT(in)    ::   ph_i     ! grid cell mean ice thickness (m)
+      REAL(wp), DIMENSION(jpf)      , INTENT(inout) ::   pQfrac   ! wave fracture probability function (s-1)
+      REAL(wp), DIMENSION(jpf,jpf)  , INTENT(inout) ::   pBfrac   ! wave fracture redistribution function, B(s',s)ds
+      INTEGER                       , INTENT(inout) ::   pstat    ! counter for whether convergence reached or not
       !
-      INTEGER                              ::   jx, jy, jf              ! dummy loop indices
-      INTEGER                              ::   jiter                   ! iteration counter for convergence
-      INTEGER                              ::   iloop                   ! number of convergence loop iterations (=1 unless ln_ht15_rand=T)
-      INTEGER                              ::   ixlo, ixhi              ! indices of x1d to locate extrema
-      INTEGER                              ::   ixfrac                  ! number of fracture points along x1d
-      LOGICAL , DIMENSION(nn_ht15_nx1d)    ::   llmin, llmax, llext     ! sea surface height is a min / is a max / is an extrema
-      REAL(wp), DIMENSION(nn_nwfreq)       ::   zphi                    ! phase of wave spectrum components (rad)
-      REAL(wp), DIMENSION(nn_ht15_nx1d)    ::   zssh                    ! sea surface height along x1d (m)
-      REAL(wp)                             ::   zdx, zdxlo, zdxhi       ! distances between x1d points in finite difference computation (m)
-      REAL(wp)                             ::   zstrain                 ! strain experienced by sea ice due to wave field
-      REAL(wp), DIMENSION(nn_ht15_nx1d)    ::   zxfrac                  ! distances to points along x1d at which ice fractures
-      REAL(wp)                             ::   zfrac_s                 ! floe size of a piece of fractured ice (m)
-      INTEGER , DIMENSION(nn_nfsd)         ::   iWfrac                  ! fracture distribution as counts in each floe size category
-      REAL(wp), DIMENSION(nn_nfsd)         ::   zsWfrac_b, zsWfrac      ! fracture distribution (multiplied by sds; dimensionless;
-      !                                                                 !    one extra with _b for saving previous loop iteration)
-      REAL(wp), DIMENSION(nn_nfsd)         ::   zsWfrac_err             ! fractional differences in zsWfrac between successive iterations
+      INTEGER                           ::   jx, jy, jf              ! dummy loop indices
+      INTEGER                           ::   jiter                   ! iteration counter for convergence
+      INTEGER                           ::   iloop                   ! number of convergence loop iterations (=1 unless ln_ht15_rand=T)
+      INTEGER                           ::   ixlo, ixhi              ! indices of x1d to locate extrema
+      INTEGER                           ::   ixfrac                  ! number of fracture points along x1d
+      LOGICAL , DIMENSION(nn_ht15_nx1d) ::   llmin, llmax, llext     ! sea surface height is a min / is a max / is an extrema
+      REAL(wp), DIMENSION(nn_nwfreq)    ::   zphi                    ! phase of wave spectrum components (rad)
+      REAL(wp), DIMENSION(nn_ht15_nx1d) ::   zssh                    ! sea surface height along x1d (m)
+      REAL(wp)                          ::   zdx, zdxlo, zdxhi       ! distances between x1d points in finite difference computation (m)
+      REAL(wp)                          ::   zstrain                 ! strain experienced by sea ice due to wave field
+      REAL(wp), DIMENSION(nn_ht15_nx1d) ::   zxfrac                  ! distances to points along x1d at which ice fractures
+      REAL(wp)                          ::   zfrac_s                 ! floe size of a piece of fractured ice (m)
+      INTEGER , DIMENSION(jpf)          ::   iWfrac                  ! fracture distribution as counts in each floe size category
+      REAL(wp), DIMENSION(jpf)          ::   zsWfrac_b, zsWfrac      ! fracture distribution (multiplied by sds; dimensionless;
+      !                                                              !    one extra with _b for saving previous loop iteration)
+      REAL(wp), DIMENSION(jpf)          ::   zsWfrac_err             ! fractional differences in zsWfrac between successive iterations
       !
       !!-------------------------------------------------------------------
 
@@ -1630,7 +1630,7 @@ CONTAINS
                ! Note that iWfrac is NOT reset to 0 between outer while loop iterations, so that it
                ! can be updated until 'convergence' if using the random phase option
                !
-               DO jf = 1, nn_nfsd - 1
+               DO jf = 1, jpf - 1
                   IF( zfrac_s < floe_su(jf) ) THEN
                      iWfrac(jf) = iWfrac(jf) + 1
                      EXIT
@@ -1640,7 +1640,7 @@ CONTAINS
                ! Separate check for largest fractures (even if it exceeds upper bound of largest
                ! floe size category, it goes into that category anyway; note similar for very small
                ! fractures accounted for in above loop anyway):
-               IF( zfrac_s >= floe_sl(nn_nfsd) ) iWfrac(nn_nfsd) = iWfrac(nn_nfsd) + 1
+               IF( zfrac_s >= floe_sl(jpf) ) iWfrac(jpf) = iWfrac(jpf) + 1
                !
             ENDDO   ! jx           [loop of fracture points]
          ENDIF   ! -- jxfrac >= 3  [at least 2 fracture points]
@@ -1679,7 +1679,7 @@ CONTAINS
 
       ! Calculate the probability (pQfrac) and redistribution (pBfrac) functions
       ! from the fracture distribution [zsWfrac, which corresponds to sW(s)ds/D]:
-      DO jf = 1, nn_nfsd
+      DO jf = 1, jpf
          !
          ! Q(s) = int[ xW(x)dx ] / D   for x < s:
          !
@@ -2097,7 +2097,7 @@ CONTAINS
          ! (see Zhang et al. 2015; JGR:O for theory):
          IF( (nn_frac_scheme == jpfrac_z16) .OR. (nn_frac_scheme == jpfrac_y24a) ) THEN
             !
-            ALLOCATE( Bfrac_uni(nn_nfsd,nn_nfsd), STAT=ierr )
+            ALLOCATE( Bfrac_uni(jpf,jpf), STAT=ierr )
             !
             IF(ierr /= 0) CALL ctl_stop('ice_wav_init: could not allocate array: Bfrac_uni')
             !
@@ -2121,7 +2121,7 @@ CONTAINS
             ! that in the wave fracture equation the smallest category loss term, which can be non-
             ! zero if Q(1) /= 0, always cancels with the corresponding gain term.
             !
-            DO jf = 1, nn_nfsd
+            DO jf = 1, jpf
                Bfrac_uni(jf,1:jf-1) =         floe_ds(1:jf-1)
                Bfrac_uni(jf,jf    ) = .5_wp * floe_ds(jf    )
                !

@@ -19,7 +19,7 @@ MODULE icedyn_adv
    USE icedyn_adv_pra ! sea-ice: advection scheme (Prather)
    USE icedyn_adv_umx ! sea-ice: advection scheme (ultimate-macho)
    USE icectl         ! sea-ice: control prints
-   USE icefsd  , ONLY : a_ifsd, ice_fsd_dia   ! sea-ice: floe size distribution
+   USE icefsd  , ONLY : ice_fsd_dia
    !
    USE in_out_manager ! I/O manager
    USE iom            ! I/O manager library
@@ -66,8 +66,8 @@ CONTAINS
       INTEGER, INTENT(in) ::   kt   ! number of iteration
       !
       ! Floe size distribution: local variables for tendency diagnostics:
-      REAL(wp), DIMENSION(A2D(0),nn_nfsd,jpl) ::   za_ifsdb   ! floe size distribution before advection
-      REAL(wp), DIMENSION(A2D(0),jpl)         ::   za_ib      ! sea ice concentration before advection
+      REAL(wp), DIMENSION(A2D(0),jpf,jpl) ::   za_ifsdb   ! floe size distribution before advection
+      REAL(wp), DIMENSION(A2D(0),jpl)     ::   za_ib      ! sea ice concentration before advection
       !
       !!---------------------------------------------------------------------
       !

@@ -23,8 +23,9 @@ MODULE sbcwave
    USE sbc_oce        ! Surface boundary condition: ocean fields
    USE bdy_oce        ! open boundary condition variables
    USE zdf_oce,  ONLY : ln_zdfswm ! Qiao wave enhanced mixing
+#if defined key_si3
    USE par_ice,  ONLY : ln_ice_wav, ln_ice_wav_attn, ln_ice_wav_spec ! sea-ice parameters
-   !
+#endif
    USE iom            ! I/O manager library
    USE in_out_manager ! I/O manager
    USE lib_mpp        ! distribued memory computing library
@@ -58,18 +59,16 @@ MODULE sbcwave
    ! In the latter case, existing cpl_* flags determine whether from file or coupled model
    !
    ! This is to help setting of various combinations of requirements for wave-ice
-   ! interaction module (icewav) and accommodate Stokes drift correction (ln_sdw).
+   ! interaction module (icewav) with SI3, and/or Stokes drift correction (ln_sdw).
    !
    ! (Might be cleaner to replace the jpfld/jp_usd/jp_vsd below completely which I already
    ! partially changed by separating out reading of hsig and wmp from sf_sd)
    !
    ! The reason for two sets of flags is that some wave-ice options require arrays to be
-   ! allocated and initialised even though data does not need to be read into them, e.g.:
-   !    1) wave in ice attenuation scheme active (ln_ice_wav_attn = TRUE)
-   !    2) wave-ice fracture scheme selection that requires wave energy spectrum and
-   !       related arrays for calculations even though the spectrum is being calculated
-   !       from hsig and wpf
+   ! allocated and initialised even if data does not need to be read into them
+   !
    ! -Jake
+   !
    LOGICAL, PUBLIC ::   l_ini_hsig  = .FALSE.
    LOGICAL, PUBLIC ::   l_ini_wper  = .FALSE.
    LOGICAL, PUBLIC ::   l_ini_wpf   = .FALSE.
@@ -487,6 +486,7 @@ CONTAINS
       IF( ln_bern_srfc .AND. .NOT.cpl_bhd )   &
          &     CALL ctl_stop( 'ln_bern_srfc option only works in coupled mode')
 
+#if defined key_si3
       !            !== Check options for wave/sea-ice interactions ==!
       !
       ! Unavoidable to do this here due to order of initialisation routines and hence namelist reads.
@@ -505,6 +505,7 @@ CONTAINS
             &   CALL ctl_warn('ln_ice_wav_spec=F but spectrum IS being read in (ln_wave_spec=T); intentional?')
          !
       ENDIF
+#endif
 
       ! Update flags for whether certain fields need to be read or not (l_get_*) and/or used (l_use_*)
       !
@@ -699,7 +700,7 @@ CONTAINS
          !
       ELSE                          !==  create the structure associated with fields to be read  ==!
          
-         IF( l_get_wspec ) THEN             ! wave energy spectrum (currently, needed for wave-ice interactions only)
+         IF( l_get_wspec ) THEN             ! wave energy spectrum (currently, for wave-ice interactions (SI3) only)
             IF( .NOT. cpl_wspec ) THEN
                ALLOCATE( sf_wspec(1), STAT=ierror )         !* allocate and fill sf_wspec with sn_wpsec
                IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_wave_init: unable to allocate sf_wspec structure' )
@@ -709,7 +710,7 @@ CONTAINS
             ENDIF
          ENDIF
 
-         IF( l_get_wpf ) THEN                  ! wave peak frequency (currently, needed for wave-ice interactions only)
+         IF( l_get_wpf ) THEN                  ! wave peak frequency (currently, for wave-ice interactions (SI3) only)
             IF( .NOT. cpl_wpf ) THEN
                ALLOCATE( sf_wpf(1), STAT=ierror )           !* allocate and fill sf_wpf with sn_wpf
                IF( ierror > 0 )   CALL ctl_stop( 'STOP', 'sbc_wave_init: unable to allocate sf_wpf structure' )
@@ -741,7 +742,7 @@ CONTAINS
 
          IF( ln_sdw ) THEN                      ! Stokes drift
             ! 1. Find out how many fields have to be read from file if not coupled
-            !    (NB. hsw now done separately, above, as it is also needed by icewav, not just sdw)
+            !    (NB. hsw now done separately, above, as it is also possibly needed by SI3, not just sdw)
             jpfld=0
             jp_usd=0   ;   jp_vsd=0
             IF( .NOT. cpl_sdrft ) THEN

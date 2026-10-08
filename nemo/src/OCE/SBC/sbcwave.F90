@@ -473,8 +473,13 @@ CONTAINS
       ENDIF
 
       !                                ! option check
+#if defined key_si3
       IF( .NOT.( ln_cdgw .OR. ln_sdw .OR. ln_tauoc .OR. ln_charn .OR. ln_ice_wav ) )   &
          &     CALL ctl_warn( 'Wave coupling/forcing activated but ln_cdgw=F, ln_sdw=F, ln_tauoc=F, ln_ice_wav=F')
+#else
+      IF( .NOT.( ln_cdgw .OR. ln_sdw .OR. ln_tauoc .OR. ln_charn) )   &
+         &     CALL ctl_warn( 'Wave coupling/forcing activated but ln_cdgw=F, ln_sdw=F, ln_tauoc=F')
+#endif
       IF( ln_cdgw .AND. ln_blk )   &
          &     CALL ctl_warn( 'drag coefficient read from wave model available ONLY with ln_NCAR and ln_MFS aerobulk options')
       IF( ln_cdgw .AND. ln_charn )   &

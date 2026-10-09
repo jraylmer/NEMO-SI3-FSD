@@ -57,6 +57,7 @@ MODULE icevar
    USE phycst         ! physical constants (ocean directory)
    USE sbc_oce , ONLY : sss_m, sst_m, ln_ice_embd, nn_fsbc
    USE ice            ! sea-ice: variables
+   USE icefsd  , ONLY : ice_fsd_cor
    !
    USE in_out_manager ! I/O manager
    USE lib_mpp        ! MPP library
@@ -640,6 +641,9 @@ CONTAINS
                v_il (ji,jj,jl) = 0._wp
                h_ip (ji,jj,jl) = 0._wp
                h_il (ji,jj,jl) = 0._wp
+               !
+               IF( ln_fsd ) a_ifsd(ji,jj,:,jl) = 0._wp   ! floe size distribution
+               !
             ENDIF
          END_2D
       END DO
@@ -660,7 +664,7 @@ CONTAINS
    END SUBROUTINE ice_var_zapsmall
 
 
-   SUBROUTINE ice_var_zapneg( ihls, pdt, pv_i, pv_s, psv_i, poa_i, pa_i, pa_ip, pv_ip, pv_il, pe_s, pe_i, pszv_i )
+   SUBROUTINE ice_var_zapneg( ihls, pdt, pv_i, pv_s, psv_i, poa_i, pa_i, pa_ip, pv_ip, pv_il, pe_s, pe_i, pszv_i, pa_ifsd )
       !!-------------------------------------------------------------------
       !!                   ***  ROUTINE ice_var_zapneg ***
       !!
@@ -680,6 +684,9 @@ CONTAINS
       REAL(wp), DIMENSION(:,:,:,:), INTENT(inout) ::   pe_i       ! ice heat content
       REAL(wp), DIMENSION(:,:,:,:), INTENT(inout) ::   pszv_i     ! ice salt content
       !
+      ! Floe size distribution: optional as FSD not implemented for UMx advection:
+      REAL(wp), DIMENSION(:,:,:,:), INTENT(inout), OPTIONAL ::   pa_ifsd
+      !
       INTEGER  ::   ji, jj, jl, jk   ! dummy loop indices
       REAL(wp) ::   z1_dt
       REAL(wp), DIMENSION(jpi,jpj) ::   zwfx_res, zhfx_res, zsfx_res ! needed since loop is not (0,0,0,0)
@@ -694,7 +701,18 @@ CONTAINS
       z1_dt = 1._wp / pdt
       !
       ! make sure a_i=0 where v_i<=0
-      WHERE( pv_i(:,:,:) <= 0._wp )   pa_i(:,:,:) = 0._wp
+      IF( ln_fsd .AND. PRESENT(pa_ifsd) ) THEN   ! need to also ensure FSD = 0 where a_i is set to 0
+         DO jl = 1, jpl
+            DO_2D( ihls, ihls, ihls, ihls )
+               IF( pv_i(ji,jj,jl) <= 0._wp ) THEN
+                  pa_i   (ji,jj,:)    = 0._wp
+                  pa_ifsd(ji,jj,:,jl) = 0._wp
+               ENDIF
+            END_2D
+         ENDDO
+      ELSE   ! as above treatment but no need to worry about FSD
+         WHERE( pv_i(:,:,:) <= 0._wp )   pa_i(:,:,:) = 0._wp
+      ENDIF
       
       !--------------------------------------
       ! zap ice salt and send it to the ocean
@@ -770,8 +788,22 @@ CONTAINS
       END_2D
       !
       WHERE( poa_i (:,:,:) < 0._wp )   poa_i (:,:,:) = 0._wp
-      WHERE( pa_i  (:,:,:) < 0._wp )   pa_i  (:,:,:) = 0._wp
       WHERE( pa_ip (:,:,:) < 0._wp )   pa_ip (:,:,:) = 0._wp
+      !
+      IF( ln_fsd .AND. PRESENT(pa_ifsd) ) THEN   ! need to also ensure FSD = 0 if ice conc. is set to 0
+         DO jl = 1, jpl
+            DO_2D( ihls, ihls, ihls, ihls )
+               IF( pa_i(ji,jj,jl) < 0._wp ) THEN
+                  pa_i   (ji,jj,jl)   = 0._wp
+                  pa_ifsd(ji,jj,:,jl) = 0._wp
+               ELSE
+                  CALL ice_fsd_cor( pa_ifsd(ji,jj,:,jl) )  ! small/negative value corrections, renormalisation
+               ENDIF
+            END_2D
+         ENDDO
+      ELSE   ! as above but no need to worry about FSD
+         WHERE( pa_i(:,:,:) < 0._wp )   pa_i(:,:,:) = 0._wp
+      ENDIF
       !
    END SUBROUTINE ice_var_zapneg
 

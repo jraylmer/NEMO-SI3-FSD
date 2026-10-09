@@ -23,18 +23,6 @@ MODULE icefsd
    IMPLICIT NONE
    PRIVATE
 
-   INTERFACE ice_fsd_cor
-      !!----------------------------------------------------------------------
-      !!                  ***  INTERFACE ice_fsd_cor ***
-      !!----------------------------------------------------------------------
-      !! ** Purpose :   Generic interface for applying numerical corrections and
-      !!                renormalisation for the floe size distribution (FSD)
-      !!----------------------------------------------------------------------
-      MODULE PROCEDURE fsd_cor_1d   ! e.g., a_ifsd(ji,jj,:,jl)
-      MODULE PROCEDURE fsd_cor_2d   ! e.g., a_ifsd(ji,jj,:,:)
-      MODULE PROCEDURE fsd_cor_4d   ! e.g., a_ifsd(:,:,:,:)
-   END INTERFACE
-
    PUBLIC ::   ice_fsd_init               ! routine called by ice_init
    PUBLIC ::   ice_fsd_istate             ! routine called by ice_istate, ice_rst_read
    PUBLIC ::   ice_fsd_wri                ! routine called by ice_stp
@@ -45,10 +33,10 @@ MODULE icefsd
    PUBLIC ::   ice_fsd_weld               ! routine called by ice_thd_do
    PUBLIC ::   ice_fsd_thd                ! routine called by ice_thd_d{a,o}
    PUBLIC ::   ice_fsd_tstep              ! routine called by ice_wav_frac
+   PUBLIC ::   ice_fsd_cor                ! routine small/negative value corrections and re-normalisation
    PUBLIC ::   fsd_eff_size               ! function called by ice_frm
    PUBLIC ::   floe_size_dist             ! function called by ice_frm
    PUBLIC ::   fsd_peri_dens              ! function called by ice_thd_da
-   PUBLIC ::   ice_fsd_cor                ! generic interface: small/negative value corrections and re-normalisation
 
    ! Additional FSD variables:
    REAL(wp),         ALLOCATABLE, DIMENSION(:)   :: floe_al      !: FSD floe areas, floes of size floe_sl (m2)
@@ -182,9 +170,9 @@ CONTAINS
    END FUNCTION fsd_eff_size
 
 
-   SUBROUTINE fsd_cor_1d( pa_ifsd_jl )
+   SUBROUTINE ice_fsd_cor( pa_ifsd_jl )
       !!-------------------------------------------------------------------
-      !!                   ***  ROUTINE fsd_cor_1d  ***
+      !!                    ***  ROUTINE ice_fsd_cor  ***
       !! ** Purpose :   Remove small/negative values and re-normalise mFSTD
       !! ** Input   :   a_ifsd(ji,jj,:,jl) (i.e., at one grid cell and one thickness category)
       !!-------------------------------------------------------------------
@@ -205,39 +193,7 @@ CONTAINS
          pa_ifsd_jl(:) = 0._wp   ! => ice-free grid cell, set to exactly 0
       ENDIF
       !
-   END SUBROUTINE fsd_cor_1d
-
-
-   SUBROUTINE fsd_cor_2d( pa_ifsd )
-      !!-------------------------------------------------------------------
-      !!                 ***  ROUTINE fsd_cor_2d  ***
-      !! ** Purpose :   Remove small/negative values and re-normalise mFSTD
-      !! ** Input   :   a_ifsd(ji,jj,:,:) (i.e., at one grid cell)
-      !!-------------------------------------------------------------------
-      REAL(wp), DIMENSION(jpf,jpl), INTENT(inout) ::   pa_ifsd   ! mFSTD (one grid cell, all ITD cats.)
-      INTEGER                                     ::   jl        ! dummy loop index
-      !!-------------------------------------------------------------------
-      DO jl = 1, jpl
-         CALL fsd_cor_1d( pa_ifsd(:,jl) )
-      ENDDO
-   END SUBROUTINE fsd_cor_2d
-
-
-   SUBROUTINE fsd_cor_4d( pa_ifsd )
-      !!-------------------------------------------------------------------
-      !!                 ***  ROUTINE fsd_cor_4d  ***
-      !! ** Purpose :   Remove small/negative values and re-normalise mFSTD
-      !! ** Input   :   a_ifsd(:,:,:,:) (i.e., full prognostic mFSTD array a_ifsd)
-      !!-------------------------------------------------------------------
-      REAL(wp), DIMENSION(jpi,jpj,jpf,jpl), INTENT(inout) ::   pa_ifsd      ! Full mFSTD (a_ifsd) array
-      INTEGER                                             ::   ji, jj, jl   ! dummy loop indices
-      !!-------------------------------------------------------------------
-      DO jl = 1, jpl
-         DO_2D(0, 0, 0, 0)
-            CALL fsd_cor_1d( pa_ifsd(ji,jj,:,jl) )
-         END_2D
-      ENDDO
-   END SUBROUTINE fsd_cor_4d
+   END SUBROUTINE ice_fsd_cor
 
 
    SUBROUTINE ice_fsd_tstep( cdcrn, pa_ifsd, ptendency, pt_elapsed, ksubt )

@@ -172,6 +172,11 @@ CONTAINS
       IF( ln_adv_UMx ) THEN   ;   ioptio = ioptio + 1   ;   nice_adv = np_advUMx    ;   ENDIF
       IF( ioptio /= 1 )   CALL ctl_stop( 'ice_dyn_adv_init: choose one and only one ice adv. scheme (ln_adv_Pra or ln_adv_UMx)' )
       !
+      IF( ln_fsd .AND. ln_adv_UMx ) THEN
+         CALL ctl_stop( 'ice_dyn_adv_init: UMx advection scheme is incompatible with floe size distribution',    &
+            &           '                  => use Prather scheme (ln_adv_Pra=T), or deactivate FSD (ln_fsd=F)'   )
+      ENDIF
+      !
       IF( ln_adv_Pra )   CALL adv_pra_init  !* read or initialize all required files
       !
    END SUBROUTINE ice_dyn_adv_init

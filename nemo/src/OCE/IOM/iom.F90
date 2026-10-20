@@ -2401,7 +2401,7 @@ CONTAINS
       TYPE(xios_domain)      :: domain_hdl
       TYPE(xios_axis)        :: axis_hdl
       TYPE(xios_scalar)      :: scalar_hdl
-      CHARACTER(LEN=64)      :: cldom, clgrd  ! name
+      CHARACTER(LEN=64)      :: cldom, clgrd, clchd_id  ! name
       INTEGER                :: jn, ja, iax
       LOGICAL                :: llscalar
       !!----------------------------------------------------------------------
@@ -2421,9 +2421,10 @@ CONTAINS
             CALL xios_set_domain_attr( clgrd, domain_ref = cldom )      ! link this new domain to cldom
             CALL xios_set_domain_attr( clgrd, name = cddom )            ! force the name to avoid duplicated dimension names
             DO ja = 1, iax
-               CALL xios_add_child( grid_hdl, axis_hdl, clgrd)          ! add a new axis
-               CALL xios_set_axis_attr( clgrd, axis_ref = cdaxe(ja) )   ! link this new axis to cdaxe(ja)
-               CALL xios_set_axis_attr( clgrd, name = cdaxe(ja) )       ! force the name to avoid duplicated dimension names
+               WRITE(clchd_id, '(A,A,I1)') TRIM(clgrd), '_axis_', ja
+               CALL xios_add_child( grid_hdl, axis_hdl, clchd_id)          ! add a new axis
+               CALL xios_set_axis_attr( clchd_id, axis_ref = cdaxe(ja) )   ! link this new axis to cdaxe(ja)
+               CALL xios_set_axis_attr( clchd_id, name = cdaxe(ja) )       ! force the name to avoid duplicated dimension names
             END DO
             IF(llscalar) THEN
                CALL xios_add_child( grid_hdl, scalar_hdl, clgrd )

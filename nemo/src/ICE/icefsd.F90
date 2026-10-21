@@ -967,14 +967,14 @@ CONTAINS
       !! ** Inputs  :   Sea ice concentration masks and 2D workspace (from ice_wri)
       !!-------------------------------------------------------------------
       !
-      INTEGER ,                        INTENT(in)    ::   kt               ! time step index
-      REAL(wp), DIMENSION(A2D(0))    , INTENT(in)    ::   pmsk00           ! 0% concentration mask
-      REAL(wp), DIMENSION(A2D(0),jpl), INTENT(in)    ::   pmsk00c          ! categories mask
-      REAL(wp), DIMENSION(A2D(0))    , INTENT(inout) ::   p2d              ! 2D workspace
+      INTEGER ,                        INTENT(in)    ::   kt           ! time step index
+      REAL(wp), DIMENSION(A2D(0))    , INTENT(in)    ::   pmsk00       ! 0% concentration mask
+      REAL(wp), DIMENSION(A2D(0),jpl), INTENT(in)    ::   pmsk00c      ! categories mask
+      REAL(wp), DIMENSION(A2D(0))    , INTENT(inout) ::   p2d          ! 2D workspace
       !
-      REAL(wp), DIMENSION(:,:,:)     , ALLOCATABLE   ::   zfsd, z3d        ! 3D workspaces
-      REAL(wp), DIMENSION(:,:)       , ALLOCATABLE   ::   z1_at_i          ! 1/at_i mask
-      INTEGER                                        ::   ji, jj, jl, jf   ! dummy loop indices
+      REAL(wp), DIMENSION(:,:,:)     , ALLOCATABLE   ::   zfsd, z3d    ! 3D workspaces
+      REAL(wp), DIMENSION(:,:)       , ALLOCATABLE   ::   z1_at_i      ! 1/at_i mask
+      INTEGER                                        ::   ji, jj, jl   ! dummy loop indices
       !
       !!-------------------------------------------------------------------
 
@@ -1024,9 +1024,7 @@ CONTAINS
          ! --- 2D diagnostics from FSD --- !
          IF( iom_use( 'icefsdsavg' ) .OR. iom_use( 'icefsdsavgi' ) ) THEN
             DO_2D(0, 0, 0, 0)
-               DO jf = 1, jpf
-                  p2d(ji,jj) = p2d(ji,jj) + floe_sc(jf) * zfsd(ji,jj,jf)
-               ENDDO
+               p2d(ji,jj) = SUM( floe_sc(:) * zfsd(ji,jj,:) )
             END_2D
             IF( iom_use( 'icefsdsavg'  ) )   CALL iom_put( 'icefsdsavg' , p2d           * pmsk00 )   ! mean floe size, grid cell
             IF( iom_use( 'icefsdsavgi' ) )   CALL iom_put( 'icefsdsavgi', p2d * z1_at_i * pmsk00 )   ! mean floe size,  over ice
@@ -1104,17 +1102,17 @@ CONTAINS
       !!                Prognostic variables before and after process each on the inner domain only.
       !!-------------------------------------------------------------------
       !
-      CHARACTER(len=3)                      , INTENT(in)  ::   cd_dia       ! process label ('lam', 'lag', etc.)
-      REAL(wp)   , DIMENSION(A2D(0),jpf,jpl), INTENT(in)  ::   pa_ifsdb     ! mFSTD (a_ifsd), L(s,h)ds, before process
-      REAL(wp)   , DIMENSION(A2D(0),jpf,jpl), INTENT(in)  ::   pa_ifsda     ! mFSTD (a_ifsd), L(s,h)ds, after  process
-      REAL(wp)   , DIMENSION(A2D(0),jpl)    , INTENT(in)  ::   pa_ib        ! ITD   (a_i)   , g(h)dh  , before process
-      REAL(wp)   , DIMENSION(A2D(0),jpl)    , INTENT(in)  ::   pa_ia        ! ITD   (a_i)   , g(h)dh  , after  process
+      CHARACTER(len=3)                      , INTENT(in)  ::   cd_dia     ! process label ('lam', 'lag', etc.)
+      REAL(wp)   , DIMENSION(A2D(0),jpf,jpl), INTENT(in)  ::   pa_ifsdb   ! mFSTD (a_ifsd), L(s,h)ds, before process
+      REAL(wp)   , DIMENSION(A2D(0),jpf,jpl), INTENT(in)  ::   pa_ifsda   ! mFSTD (a_ifsd), L(s,h)ds, after  process
+      REAL(wp)   , DIMENSION(A2D(0),jpl)    , INTENT(in)  ::   pa_ib      ! ITD   (a_i)   , g(h)dh  , before process
+      REAL(wp)   , DIMENSION(A2D(0),jpl)    , INTENT(in)  ::   pa_ia      ! ITD   (a_i)   , g(h)dh  , after  process
       !
-      CHARACTER(len=9)                                    ::   cl_sfx       ! IOM field reference suffix
-      REAL(wp), DIMENSION(:,:,:)            , ALLOCATABLE ::   z3d          ! 3D workspace
-      REAL(wp), DIMENSION(:,:)              , ALLOCATABLE ::   z2d          ! 2D workspace
-      REAL(wp), DIMENSION(:,:)              , ALLOCATABLE ::   zmsk00       ! ice present mask
-      INTEGER                                             ::   ji, jj, jf   ! dummy loop indices
+      CHARACTER(len=9)                                    ::   cl_sfx     ! IOM field reference suffix
+      REAL(wp), DIMENSION(:,:,:)            , ALLOCATABLE ::   z3d        ! 3D workspace
+      REAL(wp), DIMENSION(:,:)              , ALLOCATABLE ::   z2d        ! 2D workspace
+      REAL(wp), DIMENSION(:,:)              , ALLOCATABLE ::   zmsk00     ! ice present mask
+      INTEGER                                             ::   ji, jj     ! dummy loop indices
       !
       !!-------------------------------------------------------------------
 
@@ -1161,11 +1159,8 @@ CONTAINS
          ! --- mean floe size tendency ( = int[ s*df/dt ] ds ) --- !
          IF( iom_use( 'icefsdsavg'//TRIM(cl_sfx) ) ) THEN
             ALLOCATE( z2d(A2D(0)) )
-            z2d(:,:) = 0._wp
             DO_2D(0, 0, 0, 0)
-               DO jf = 1, jpf
-                  z2d(ji,jj) = z2d(ji,jj) + floe_sc(jf) * z3d(ji,jj,jf)
-               ENDDO
+               z2d(ji,jj) = SUM( floe_sc(:) * z3d(ji,jj,:) )   ! z3d = df(s)/dt
             END_2D
             CALL iom_put( 'icefsdsavg'//TRIM(cl_sfx) , z2d * zmsk00 )
             DEALLOCATE( z2d )

@@ -238,8 +238,6 @@ CONTAINS
          !
                                         CALL ice_wri( kt )            ! -- Ice outputs
          !
-         IF( ln_fsd )                   CALL ice_fsd_wri( kt )        ! -- Ice outputs related to FSD
-         !
          IF( lrst_ice )                 CALL ice_rst_write( kt )      ! -- Ice restart file
          !
          IF( ln_icectl )                CALL ice_ctl( kt )            ! -- Control checks

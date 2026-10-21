@@ -17,6 +17,7 @@ MODULE icewri
    USE sbc_oce , ONLY : sprecip, qns, qsr, sst_m, sss_m
    USE sbc_ice        ! Surface boundary condition: ice fields
    USE ice            ! sea-ice: variables
+   USE icefsd  , ONLY : ice_fsd_wri
    USE icevar  , ONLY : ice_var_brine
    !
    USE ioipsl         !
@@ -193,6 +194,9 @@ CONTAINS
          CALL iom_put( 'icesalt_lay' , sz_i(A2D(0),:,:)      * zmsk00l + zmiss * ( 1._wp - zmsk00l ) ) ! ice salinity
          DEALLOCATE( zmsk00l )
       ENDIF
+
+      ! --- floe size distribution fields --- !
+      IF( ln_fsd )   CALL ice_fsd_wri( kt, zmsk00, zmsk00c, z2d )
 
       !------------------
       ! Add-ons for SIMIP

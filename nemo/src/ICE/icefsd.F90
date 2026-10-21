@@ -958,97 +958,132 @@ CONTAINS
    END SUBROUTINE ice_fsd_weld
 
 
-   SUBROUTINE ice_fsd_wri( kt )
+   SUBROUTINE ice_fsd_wri( kt, pmsk00, pmsk00c, p2d )
       !!-------------------------------------------------------------------
       !!                 ***  ROUTINE ice_fsd_wri  ***
       !!
-      !! ** Purpose :   Writes output fields related to the FSD.
-      !!
-      !! ** Method  :   Calculates metrics if requested for output and
-      !!                writes using iom routines.
-      !!
+      !! ** Purpose :   Write output fields related to the FSD.
+      !! ** Method  :   See external docs for eqs./meanings of various diagnostics
+      !! ** Inputs  :   Sea ice concentration masks and 2D workspace (from ice_wri)
       !!-------------------------------------------------------------------
       !
-      INTEGER, INTENT(in) ::   kt                    ! ocean time step index
+      INTEGER ,                        INTENT(in)    ::   kt               ! time step index
+      REAL(wp), DIMENSION(A2D(0))    , INTENT(in)    ::   pmsk00           ! 0% concentration mask
+      REAL(wp), DIMENSION(A2D(0),jpl), INTENT(in)    ::   pmsk00c          ! categories mask
+      REAL(wp), DIMENSION(A2D(0))    , INTENT(inout) ::   p2d              ! 2D workspace
       !
-      REAL(wp), DIMENSION(A2D(0))     ::   zsavg       ! mean floe size, grid cell (m)
-      REAL(wp), DIMENSION(A2D(0))     ::   zperi       ! perimeter density, grid cell (m.m-2)
-      REAL(wp), DIMENSION(A2D(0))     ::   zseff       ! effective floe size, grid cell (m)
-      REAL(wp), DIMENSION(A2D(0))     ::   zmsk00      ! 0% conc. mask, grid cell
-      REAL(wp), DIMENSION(A2D(0))     ::   zmsk1_ati   ! mask = 1/at_i (ice) or 0 (no ice)
-      REAL(wp), DIMENSION(A2D(0),jpl) ::   zperi_cat   ! perimeter density, each ITD category (m.m-2)
-      REAL(wp), DIMENSION(A2D(0),jpl) ::   zseff_cat   ! effective floe size, each ITD category (m)
-      REAL(wp), DIMENSION(A2D(0),jpl) ::   zmsk00c     ! 0% conc. mask, each ITD category
-      !
-      REAL(wp), DIMENSION(A2D(0),jpf,jpl) :: zmsk00fc         ! 0% conc. mask, each ITD and FSD category
-      REAL(wp), DIMENSION(A2D(0),jpf)     :: zmsk00f          ! 0% conc. mask, each FSD category
-      REAL(wp), DIMENSION(A2D(0),jpf)     :: zfsd             ! FSD integrated over ITD
-      REAL(wp), DIMENSION(A2D(0),jpf)     :: zpdd             ! Perimeter density distribution
-      INTEGER                             :: ji, jj, jl, jf   ! dummy loop indices
+      REAL(wp), DIMENSION(:,:,:)     , ALLOCATABLE   ::   zfsd, z3d        ! 3D workspaces
+      REAL(wp), DIMENSION(:,:)       , ALLOCATABLE   ::   z1_at_i          ! 1/at_i mask
+      INTEGER                                        ::   ji, jj, jl, jf   ! dummy loop indices
       !
       !!-------------------------------------------------------------------
 
-      ! --- Calculate sea ice threshold masks for outputs (as in subroutine ice_wri)
-      zmsk00 (:,:)   = MERGE( 1._wp, 0._wp, at_i(A2D(0))  >= epsi06  )
-      zmsk00c(:,:,:) = MERGE( 1._wp, 0._wp, a_i(A2D(0),:) >= epsi06  )
+      ! Compute mask = 1/at_i or 0 where at_i too small
+      ! (only needed for mean ice floe size or number density distribution):
+      IF( iom_use( 'icefsdsavgi' ) .OR. iom_use( 'icendd' ) ) THEN
+         ALLOCATE( z1_at_i(A2D(0)) )
+         WHERE( at_i(A2D(0)) > .05_wp ) ; z1_at_i = 1._wp / at_i(A2D(0))
+         ELSEWHERE                      ; z1_at_i = 0._wp
+         ENDWHERE
+      ENDIF
 
-      ! --- Analogous masks including FSD dimension
-      DO jf = 1, jpf
-         zmsk00f (:,:,jf)   = MERGE( 1._wp, 0._wp, at_i(A2D(0))  >= epsi06 )
-         zmsk00fc(:,:,jf,:) = MERGE( 1._wp, 0._wp, a_i(A2D(0),:) >= epsi06 )
-      ENDDO
+      ! --- Constant fields --- !
+      IF( iom_use(  'icefsd_sl'  ) )   CALL iom_put( 'icefsd_sl'  , floe_sl(:) )   ! floe size cat. lower bound
+      IF( iom_use(  'icefsd_sc'  ) )   CALL iom_put( 'icefsd_sc'  , floe_sc(:) )   ! floe size cat. centre
+      IF( iom_use(  'icefsd_su'  ) )   CALL iom_put( 'icefsd_su'  , floe_su(:) )   ! floe size cat. upper bound
+      IF( iom_use(  'icefsd_ds'  ) )   CALL iom_put( 'icefsd_ds'  , floe_ds(:) )   ! floe size cat. width (ds)
+      IF( iom_use(  'icefsd_al'  ) )   CALL iom_put( 'icefsd_al'  , floe_al(:) )   ! floe area, cat. lower bound
+      IF( iom_use(  'icefsd_ac'  ) )   CALL iom_put( 'icefsd_ac'  , floe_ac(:) )   ! floe area, cat. centre
+      IF( iom_use(  'icefsd_au'  ) )   CALL iom_put( 'icefsd_au'  , floe_au(:) )   ! floe area, cat. upper bound
 
-      ! --- Calculate new mask = 1/at_i or 0 if at_i too small:
-      zmsk1_ati(A2D(0)) = 0._wp
-      WHERE( at_i(A2D(0)) >= epsi06 ) zmsk1_ati(A2D(0)) = 1._wp / at_i(A2D(0))
+      ! --- Fields depending on thickness and floe size category --- !
+      IF( iom_use( 'icefstd_mod' ) )   CALL iom_put( 'icefstd_mod', a_ifsd(A2D(0),:,:) * SPREAD(                 pmsk00c, 3, jpf ) )   ! L(s,h)ds
+      IF( iom_use( 'icefstd'     ) )   CALL iom_put( 'icefstd'    , a_ifsd(A2D(0),:,:) * SPREAD( a_i(A2D(0),:) * pmsk00c, 3, jpf ) )   ! F(s,h)dsdh
 
-      ! --- Calculate outputs
-      !
-      zseff_cat(A2D(0),:) = 0._wp   ! initialise
-      zseff    (A2D(0))   = 0._wp
-      zsavg    (A2D(0))   = 0._wp
-      !
-      DO_2D(0, 0, 0, 0)
+      ! --- Floe size distribution and/or fields derived from it --- !
+      IF( iom_use( 'icefsd' ) .OR. iom_use( 'icendd' )                                     &
+         &                    .OR. iom_use( 'icefsdsavg' ) .OR. iom_use( 'icefsdsavgi' )   &
+         &                    .OR. iom_use( 'icefsdseff' ) .OR. iom_use( 'icefsdperi'  )    ) THEN
          !
-         ! Floe size distribution and perimeter density distributions:
-         zfsd(ji,jj,:) = floe_size_dist( a_ifsd(ji,jj,:,:), a_i(ji,jj,:) )
-         zpdd(ji,jj,:) = peri_dens_dist( a_ifsd(ji,jj,:,:), a_i(ji,jj,:) )
+         ALLOCATE( zfsd(A2D(0),jpf) )
+         DO_2D(0, 0, 0, 0)
+            zfsd(ji,jj,:) = floe_size_dist( a_ifsd(ji,jj,:,:), a_i(ji,jj,:) )
+         END_2D
+         IF( iom_use( 'icefsd' ) )   CALL iom_put( 'icefsd' , zfsd * SPREAD( pmsk00, 3, jpf ) )   ! f(s)ds
          !
-         ! Area-weighted mean floe size:
-         DO jf = 1, jpf
-            zsavg(ji,jj) = zsavg(ji,jj) + floe_sc(jf) * zfsd(ji,jj,jf)
-         ENDDO
+         ! --- 3D diagnostics from FSD --- !
+         IF( iom_use( 'icendd' ) ) THEN
+            ALLOCATE( z3d(A2D(0),jpf) )
+            DO_2D(0, 0, 0, 0)
+               z3d(ji,jj,:) = zfsd(ji,jj,:) * z1_at_i(ji,jj) / floe_ac(:)
+            END_2D
+            CALL iom_put( 'icendd', z3d(A2D(0),:) * SPREAD( pmsk00, 3, jpf ) )   ! n_d(s)ds
+            DEALLOCATE( z3d )
+         ENDIF
          !
-         ! Perimeter density and effective floe size, per ITD category:
+         ! --- 2D diagnostics from FSD --- !
+         IF( iom_use( 'icefsdsavg' ) .OR. iom_use( 'icefsdsavgi' ) ) THEN
+            DO_2D(0, 0, 0, 0)
+               DO jf = 1, jpf
+                  p2d(ji,jj) = p2d(ji,jj) + floe_sc(jf) * zfsd(ji,jj,jf)
+               ENDDO
+            END_2D
+            IF( iom_use( 'icefsdsavg'  ) )   CALL iom_put( 'icefsdsavg' , p2d           * pmsk00 )   ! mean floe size, grid cell
+            IF( iom_use( 'icefsdsavgi' ) )   CALL iom_put( 'icefsdsavgi', p2d * z1_at_i * pmsk00 )   ! mean floe size,  over ice
+         ENDIF
+         !
+         DEALLOCATE( z1_at_i )
+         !
+         IF( iom_use( 'icefsdperi' ) ) THEN   ! perimeter density (all ice)
+            DO_2D(0, 0, 0, 0)
+               p2d(ji,jj) = fsd_peri_dens( zfsd(ji,jj,:) )
+            END_2D
+            CALL iom_put( 'icefsdperi', p2d * pmsk00 )
+         ENDIF
+         !
+         IF( iom_use( 'icefsdseff' ) ) THEN   ! effective floe size (all ice)
+            DO_2D(0, 0, 0, 0)
+               p2d(ji,jj) = fsd_eff_size( zfsd(ji,jj,:) )
+            END_2D
+            CALL iom_put( 'icefsdseff', p2d * pmsk00 )
+         ENDIF
+         !
+         DEALLOCATE( zfsd )
+      ENDIF
+
+      ! --- Perimeter density distribution --- !
+      IF( iom_use( 'icepdd' ) ) THEN
+         ALLOCATE( z3d(A2D(0),jpf) )
+         DO_2D(0, 0, 0, 0)
+            z3d(ji,jj,:) = peri_dens_dist( a_ifsd(ji,jj,:,:), a_i(ji,jj,:) )
+         END_2D
+         CALL iom_put( 'icepdd', z3d * SPREAD( pmsk00, 3, jpf ) )
+         DEALLOCATE( z3d )
+      ENDIF
+
+      ! --- Perimeter density diagnostic, per ITD category --- !
+      IF( iom_use( 'icefsdperi_cat' ) ) THEN
+         ALLOCATE( z3d(A2D(0),jpl) )
          DO jl = 1, jpl
-            zperi_cat(ji,jj,jl) = fsd_peri_dens( a_ifsd(ji,jj,:,jl) )
-            zseff_cat(ji,jj,jl) = fsd_eff_size(  a_ifsd(ji,jj,:,jl) )
+            DO_2D(0, 0, 0, 0)
+               z3d(ji,jj,jl) = fsd_peri_dens( a_ifsd(ji,jj,:,jl) )
+            END_2D
          ENDDO
-         !
-         ! Perimeter density and effective floe size, for all ice:
-         zperi(ji,jj) = fsd_peri_dens( zfsd(ji,jj,:) )
-         zseff(ji,jj) = fsd_eff_size(  zfsd(ji,jj,:) )
-         !
-      END_2D
+         CALL iom_put( 'icefsdperi_cat', z3d * pmsk00c )
+         DEALLOCATE( z3d )
+      ENDIF
 
-      ! --- Write constant fields to output (if requested, case-by-case)
-      IF(iom_use( 'icefsd_sl' )) CALL iom_put( 'icefsd_sl' , floe_sl(:) )
-      IF(iom_use( 'icefsd_sc' )) CALL iom_put( 'icefsd_sc' , floe_sc(:) )
-      IF(iom_use( 'icefsd_su' )) CALL iom_put( 'icefsd_su' , floe_su(:) )
-      IF(iom_use( 'icefsd_al' )) CALL iom_put( 'icefsd_al' , floe_al(:) )
-      IF(iom_use( 'icefsd_ac' )) CALL iom_put( 'icefsd_ac' , floe_ac(:) )
-      IF(iom_use( 'icefsd_au' )) CALL iom_put( 'icefsd_au' , floe_au(:) )
-      IF(iom_use( 'icefsd_ds' )) CALL iom_put( 'icefsd_ds' , floe_ds(:) )
-
-      ! --- Write variable fields to output (if requested, case-by-case)
-      IF(iom_use( 'icefsd_cat'     )) CALL iom_put( 'icefsd_cat'     , a_ifsd   (A2D(0),:,:) * zmsk00fc )
-      IF(iom_use( 'icefsd'         )) CALL iom_put( 'icefsd'         , zfsd     (A2D(0),:)   * zmsk00f  )
-      IF(iom_use( 'icepdd'         )) CALL iom_put( 'icepdd'         , zpdd     (A2D(0),:)   * zmsk00f  )
-      IF(iom_use( 'icefsdperi_cat' )) CALL iom_put( 'icefsdperi_cat' , zperi_cat(A2D(0),:)   * zmsk00c  )
-      IF(iom_use( 'icefsdseff_cat' )) CALL iom_put( 'icefsdseff_cat' , zseff_cat(A2D(0),:)   * zmsk00c  )
-      IF(iom_use( 'icefsdperi'     )) CALL iom_put( 'icefsdperi'     , zperi    (A2D(0))     * zmsk00   )
-      IF(iom_use( 'icefsdseff'     )) CALL iom_put( 'icefsdseff'     , zseff    (A2D(0))     * zmsk00   )
-      IF(iom_use( 'icefsdsavg'     )) CALL iom_put( 'icefsdsavg'     , zsavg    (A2D(0))     * zmsk00   )
+      ! --- Effective floe size diagnostic per ITD category --- !
+      IF( iom_use('icefsdseff_cat') ) THEN
+         ALLOCATE( z3d(A2D(0),jpl) )
+         DO jl = 1, jpl
+            DO_2D(0, 0, 0, 0)
+               z3d(ji,jj,jl) = fsd_eff_size( a_ifsd(ji,jj,:,jl) )
+            END_2D
+         ENDDO
+         CALL iom_put( 'icefsdseff_cat', z3d * pmsk00c )
+         DEALLOCATE( z3d )
+      ENDIF
 
    END SUBROUTINE ice_fsd_wri
 
@@ -1059,86 +1094,96 @@ CONTAINS
       !!
       !! ** Purpose :   Calculate and write FSD tendency diagnostics
       !!
-      !! ** Method  :   The change in floe size-thickness distribution, FSTD = a_ifsd*a_i,
-      !!                is calculated as (FSTD_a - FSTD_b) / rDt_ice, where '_a' and '_b' refer to
-      !!                after and before the process of which the tendency is computed. This is done
-      !!                similarly for other FSD-related diagnostics such as mean floe size.
-      !!                Diagnostics are sent to IOM as required.
+      !! ** Method  :   The change in floe size distribuion or any other distribution/diagnostic derived
+      !!                from it is calculated from the prognostic variables for the 'modified-areal' floe
+      !!                size-thickness distribution (mFSTD), a_ifsd, and/or the ice thickness distribution
+      !!                (ITD), a_i, values before and after the process of interest and divided by the time
+      !!                step to give a tendency.
       !!
       !! ** Inputs  :   Length-3 character name of process for diagnostic suffix (e.g., 'lam' for lateral melt)
-      !!                Prognostic FSTD and ice concentration (cat.) variables before and after process,
-      !!                each on the inner domain only [i.e., send a_ifsd(A2D(0),:,:)].
-      !!
+      !!                Prognostic variables before and after process each on the inner domain only.
       !!-------------------------------------------------------------------
       !
-      CHARACTER(len=3)                      , INTENT(in) ::   cd_dia     ! process label (lam, lag, etc.)
-      REAL(wp)   , DIMENSION(A2D(0),jpf,jpl), INTENT(in) ::   pa_ifsdb   ! FSTD before process (inner domain)
-      REAL(wp)   , DIMENSION(A2D(0),jpf,jpl), INTENT(in) ::   pa_ifsda   ! FSTD after process (inner domain)
-      REAL(wp)   , DIMENSION(A2D(0),jpl)    , INTENT(in) ::   pa_ib      ! a_i before process (inner domain)
-      REAL(wp)   , DIMENSION(A2D(0),jpl)    , INTENT(in) ::   pa_ia      ! a_i after process (inner domain)
+      CHARACTER(len=3)                      , INTENT(in)  ::   cd_dia       ! process label ('lam', 'lag', etc.)
+      REAL(wp)   , DIMENSION(A2D(0),jpf,jpl), INTENT(in)  ::   pa_ifsdb     ! mFSTD (a_ifsd), L(s,h)ds, before process
+      REAL(wp)   , DIMENSION(A2D(0),jpf,jpl), INTENT(in)  ::   pa_ifsda     ! mFSTD (a_ifsd), L(s,h)ds, after  process
+      REAL(wp)   , DIMENSION(A2D(0),jpl)    , INTENT(in)  ::   pa_ib        ! ITD   (a_i)   , g(h)dh  , before process
+      REAL(wp)   , DIMENSION(A2D(0),jpl)    , INTENT(in)  ::   pa_ia        ! ITD   (a_i)   , g(h)dh  , after  process
       !
-      CHARACTER(len=25) ::   cl_ref   ! output field reference (whole name including suffix)
-      CHARACTER(len=4)  ::   cl_sfx   ! output field reference (suffix)
-      !
-      REAL(wp), DIMENSION(A2D(0),jpf,jpl) ::   zmsk00fc     ! Ice present mask (2D + FSD and ITD dimensions)
-      REAL(wp), DIMENSION(A2D(0),jpf)     ::   zmsk00f      ! Ice present mask (2D + FSD dimension)
-      REAL(wp), DIMENSION(A2D(0))         ::   zmsk00       ! Ice present mask (2D)
-      REAL(wp), DIMENSION(A2D(0),jpf,jpl) ::   zdfstd       ! Tendency of FSTD
-      REAL(wp), DIMENSION(A2D(0),jpf)     ::   zdfsd        ! Tendency of FSD (FSTD integrated over ITD)
-      REAL(wp), DIMENSION(A2D(0))         ::   zdsavg       ! Tendency of mean floe size (m/s)
-      REAL(wp), DIMENSION(A2D(0))         ::   zat_ia       ! Total ice concentration (after process)
-      INTEGER                             ::   ji, jj, jf   ! dummy loop indices
+      CHARACTER(len=9)                                    ::   cl_sfx       ! IOM field reference suffix
+      REAL(wp), DIMENSION(:,:,:)            , ALLOCATABLE ::   z3d          ! 3D workspace
+      REAL(wp), DIMENSION(:,:)              , ALLOCATABLE ::   z2d          ! 2D workspace
+      REAL(wp), DIMENSION(:,:)              , ALLOCATABLE ::   zmsk00       ! ice present mask
+      INTEGER                                             ::   ji, jj, jf   ! dummy loop indices
       !
       !!-------------------------------------------------------------------
 
-      zat_ia(:,:) = SUM( pa_ia(:,:,:), DIM=3 )   ! total ice conc. after
-
-      ! --- Calculate sea ice threshold masks for outputs (as in subroutine ice_wri)
-      zmsk00 (:,:)   = MERGE( 1._wp, 0._wp, zat_ia(:,:)  >= epsi06 )
-
-      ! --- Analogous masks including FSD dimension
-      DO jf = 1, jpf
-         zmsk00f (:,:,jf)   = MERGE( 1._wp, 0._wp, zat_ia(:,:)  >= epsi06 )
-         zmsk00fc(:,:,jf,:) = MERGE( 1._wp, 0._wp, pa_ia(:,:,:) >= epsi06 )
-      ENDDO
-
-      ! Calculate tendency diagnostics:
-      !
-      zdsavg(:,:) = 0._wp  ! initialise
-      !
-      DO_2D(0, 0, 0, 0)
-         !
-         ! Full FSTD tendency:
-         zdfstd(ji,jj,:,:) = r1_Dt_ice * ( pa_ifsda(ji,jj,:,:) - pa_ifsdb(ji,jj,:,:) )
-         !
-         ! Floe size distribution tendency:
-         zdfsd(ji,jj,:)    = r1_Dt_ice * (  floe_size_dist( pa_ifsda(ji,jj,:,:), pa_ia(ji,jj,:) )   &
-            &                             - floe_size_dist( pa_ifsdb(ji,jj,:,:), pa_ib(ji,jj,:) )   )
-         !
-         ! Mean floe size tendency from integrating FSD, above, which already has 1/dt factor:
-         DO jf = 1, jpf
-            zdsavg(ji,jj) = zdsavg(ji,jj) + floe_sc(jf) * zdfsd(ji,jj,jf)
-         ENDDO
-         !
-      END_2D
-
-      ! Determine suffix for field references. If it is total (tendency across whole time step
-      ! i.e. all processes) then we do not add a suffix, otherwise it is the 3-char. input:
-      IF( TRIM(cd_dia) == 'tot' ) THEN
-         cl_sfx = ''
-      ELSE
-         cl_sfx = '_'//TRIM(cd_dia)
+      ! Field reference suffix from cd_dia input: if it is 'tot' (tendency across
+      ! whole time step, i.e., all processes) then we do not add a suffix:
+      IF( TRIM(cd_dia) == 'tot' ) THEN ; cl_sfx = '_tend'
+      ELSE                             ; cl_sfx = '_tend_'//TRIM(cd_dia)
       ENDIF
 
-      ! Write diagnostics:
-      cl_ref = 'icefsd_cat_tend'//TRIM(cl_sfx)
-      IF( iom_use( cl_ref ) )   CALL iom_put( cl_ref, zdfstd * zmsk00fc )
+      IF(       iom_use( 'icefstd'   //TRIM(cl_sfx) ) .OR. iom_use( 'icefsd'    //TRIM(cl_sfx) )   &
+         & .OR. iom_use( 'icefsdsavg'//TRIM(cl_sfx) ) .OR. iom_use( 'icefsdperi'//TRIM(cl_sfx) )    ) THEN
+         !
+         ! Sea ice presence mask (at end of time step) as computed in subroutine ice_wri:
+         ALLOCATE( zmsk00(A2D(0)) )
+         zmsk00(:,:) = MERGE( 1._wp, 0._wp, SUM( pa_ia(:,:,:), DIM=3 ) >= epsi06 )
+      ELSE
+         RETURN   ! no relevant output fields are active
+      ENDIF
 
-      cl_ref = 'icefsd_tend'//TRIM(cl_sfx)
-      IF( iom_use( cl_ref ) )   CALL iom_put( cl_ref, zdfsd  * zmsk00f  )
+      ! -------------------------------------- !
+      ! Compute and write tendency diagnostics !
+      ! -------------------------------------- !
 
-      cl_ref = 'icefsdsavg_tend'//TRIM(cl_sfx)
-      IF( iom_use( cl_ref ) )   CALL iom_put( cl_ref, zdsavg * zmsk00   )
+      IF( iom_use( 'icefstd'//TRIM(cl_sfx) ) ) THEN
+         ! -------- FSTD tendency ( d/dt[ F(s,h)dsdh ] = d/dt[ L(s,h)g(h)dsdh ] ) --------- !
+         CALL iom_put( 'icefstd'//TRIM(cl_sfx) ,                                            &
+            &          r1_Dt_ice * (   pa_ifsda(:,:,:,:) * SPREAD(pa_ia, 3, jpf)            &
+            &                        - pa_ifsdb(:,:,:,:) * SPREAD(pa_ib, 3, jpf) )          &
+            &                    * SPREAD( MERGE( 1._wp, 0._wp, pa_ia >= epsi06 ), 3, jpf ) )
+      ENDIF
+
+      IF( iom_use( 'icefsd'//TRIM(cl_sfx) ) .OR. iom_use( 'icefsdsavg'//TRIM(cl_sfx) ) ) THEN
+
+         ! --- floe size distribution tendency ( d/dt[f(s)ds] ) --- !
+         ALLOCATE( z3d(A2D(0),jpf) )
+         DO_2D(0, 0, 0, 0)
+            z3d(ji,jj,:) = r1_Dt_ice * (  floe_size_dist( pa_ifsda(ji,jj,:,:), pa_ia(ji,jj,:) )   &
+               &                        - floe_size_dist( pa_ifsdb(ji,jj,:,:), pa_ib(ji,jj,:) )   )
+         END_2D
+
+         IF(         iom_use( 'icefsd'//TRIM(cl_sfx) ) )                              &
+            &   CALL iom_put( 'icefsd'//TRIM(cl_sfx) , z3d * SPREAD( zmsk00, 3, jpf ) )
+
+         ! --- mean floe size tendency ( = int[ s*df/dt ] ds ) --- !
+         IF( iom_use( 'icefsdsavg'//TRIM(cl_sfx) ) ) THEN
+            ALLOCATE( z2d(A2D(0)) )
+            z2d(:,:) = 0._wp
+            DO_2D(0, 0, 0, 0)
+               DO jf = 1, jpf
+                  z2d(ji,jj) = z2d(ji,jj) + floe_sc(jf) * z3d(ji,jj,jf)
+               ENDDO
+            END_2D
+            CALL iom_put( 'icefsdsavg'//TRIM(cl_sfx) , z2d * zmsk00 )
+            DEALLOCATE( z2d )
+         ENDIF
+         !
+         DEALLOCATE( z3d )
+      ENDIF
+
+      IF( iom_use( 'icefsdperi'//TRIM(cl_sfx) ) ) THEN
+         ! --- perimeter density tendency --- !
+         ALLOCATE( z2d(A2D(0)) )
+         DO_2D(0, 0, 0, 0)
+            z2d(ji,jj) = r1_Dt_ice * (  fsd_peri_dens( floe_size_dist( pa_ifsda(ji,jj,:,:), pa_ia(ji,jj,:) ) )   &
+               &                      - fsd_peri_dens( floe_size_dist( pa_ifsdb(ji,jj,:,:), pa_ib(ji,jj,:) ) )   )
+         END_2D
+         CALL iom_put( 'icefsdperi'//TRIM(cl_sfx) , z2d * zmsk00 )
+         DEALLOCATE( z2d )
+      ENDIF
 
    END SUBROUTINE ice_fsd_dia
 

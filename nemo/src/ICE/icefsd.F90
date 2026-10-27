@@ -1350,13 +1350,15 @@ CONTAINS
       floe_au = rn_floeshape * floe_su ** 2
 
       ! --- Calculate category index of default new ice floe size set in namelist
-      nf_newice = jpf
-      DO jf = jpf-1, 1, -1
+      nf_newice = 1
+      DO jf = 2, jpf-1
          IF( (rn_fsd_s_newice >= floe_sl(jf)) .AND. (rn_fsd_s_newice < floe_su(jf)) ) THEN
             nf_newice = jf
             EXIT
          ENDIF
       ENDDO
+      ! Separate check for largest category (upper limit is truncation, not a strict limit):
+      IF( (rn_fsd_s_newice >= floe_sl(jpf)) )   nf_newice = jpf
 
       ! --- Calculate floe welding array, floe_iweld
       floe_iweld(:,:) = 0   ! initialise (to unused value)

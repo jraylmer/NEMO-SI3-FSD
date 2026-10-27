@@ -326,10 +326,10 @@ CONTAINS
       !!
       !!                When restoring is needed, based on the above condition estimated between
       !!                floe size categories j and j-1 using a backward-in-space finite difference,
-      !!                area fraction from category j is transferred into category j-1 following a
-      !!                (quasi-)exponential decay:
+      !!                area fraction from category j is transferred into category j-1 following an
+      !!                exponential decay:
       !!
-      !!                   d(ln L)/d(ln s)|_j = -L_j / t_res
+      !!                   d/dt L_j = -L_j / t_res
       !!
       !!                where t_res is a restoring timescale (namelist rn_fsd_brit_tres) and the
       !!                same tendency (right-hand side) is applied to category j-1 with opposite
@@ -372,9 +372,10 @@ CONTAINS
                   zgain(:) = 0._wp
 
                   DO jf = 2, jpf
-                     ! Backward-in-(log)-space gradient (denominator pre-computed in fsd_initbounds):
-                     zlogfsd_grad = ( LOG(a_ifsd(ji,jj,jf,jl)) - LOG(a_ifsd(ji,jj,jf-1,jl)) )   &
-                        &           / floe_dlog_sc(jf)
+                     ! Backward-in-(log)-space gradient (note a_ifsd <--> L*ds
+                     ! and denominator pre-computed in fsd_initbounds):
+                     zlogfsd_grad = (   LOG( a_ifsd(ji,jj,jf  ,jl) / floe_ds(jf  ) )   &
+                        &             - LOG( a_ifsd(ji,jj,jf-1,jl) / floe_ds(jf-1) ) ) / floe_dlog_sc(jf)
                      !
                      ! If gradient is too large here, restore toward maximum allowed gradient by
                      ! transferring area fraction to the smaller category as exponential decay

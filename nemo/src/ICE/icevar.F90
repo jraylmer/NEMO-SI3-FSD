@@ -705,7 +705,7 @@ CONTAINS
          DO jl = 1, jpl
             DO_2D( ihls, ihls, ihls, ihls )
                IF( pv_i(ji,jj,jl) <= 0._wp ) THEN
-                  pa_i   (ji,jj,:)    = 0._wp
+                  pa_i   (ji,jj,  jl) = 0._wp
                   pa_ifsd(ji,jj,:,jl) = 0._wp
                ENDIF
             END_2D

@@ -253,7 +253,7 @@ CONTAINS
             !
             IF ( ln_fsd ) THEN
                DO_3D( ihls+1, ihls+1, ihls+1, ihls+1, 1, jpf )
-                  z0fsd(ji,jj,jk) = pa_ifsd(ji,jj,jk,jl) * e1e2t(ji,jj)
+                  z0fsd(ji,jj,jk) = pa_ifsd(ji,jj,jk,jl) * pa_i(ji,jj,jl) * e1e2t(ji,jj)   ! pa_ifsd is fraction of ice area [0-1]
                END_3D
             ENDIF
             !
@@ -412,9 +412,15 @@ CONTAINS
             ENDIF
             !
             IF ( ln_fsd ) THEN
-               DO_3D( ihls, ihls, ihls, ihls, 1, jpf )
-                  pa_ifsd(ji,jj,jk,jl) = z0fsd(ji,jj,jk) * r1_e1e2t(ji,jj) * tmask(ji,jj,1)
-               END_3D
+               DO_2D( ihls, ihls, ihls, ihls )
+                  IF( pa_i(ji,jj,jl) > epsi20 ) THEN
+                     DO jk = 1, jpf
+                        pa_ifsd(ji,jj,jk,jl) = z0fsd(ji,jj,jk) * r1_e1e2t(ji,jj) * tmask(ji,jj,1) / pa_i(ji,jj,jl)
+                     ENDDO
+                  ELSE
+                     pa_ifsd(ji,jj,:,jl) = 0._wp
+                  ENDIF
+               END_2D
             ENDIF
                         
             ! --- diagnostics --- !

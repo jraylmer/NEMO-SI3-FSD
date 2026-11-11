@@ -19,6 +19,7 @@ MODULE icedyn_rdgrft
    USE phycst         ! physical constants (ocean directory)
    USE sbc_oce , ONLY : sss_m, sst_m   ! surface boundary condition: ocean fields
    USE ice            ! sea-ice: variables
+   USE icefsd  , ONLY : ice_fsd_cor
    USE icevar  , ONLY : ice_var_roundoff
    USE icectl         ! sea-ice: control prints
    !
@@ -680,6 +681,9 @@ CONTAINS
       REAL(wp), DIMENSION(A2D(0)) ::   oirft, aprft, vsrft, vprft, vlrft  ! area etc of rafted ice
       REAL(wp), DIMENSION(A2D(0),nlay_i) ::   sirdg, sirft
       !
+      REAL(wp), ALLOCATABLE, DIMENSION(:,:,:,:) ::   zaiAfsd            ! for floe size distribution
+      REAL(wp), ALLOCATABLE, DIMENSION(:,:,:)   ::   afsdrdg, afsdrft   ! for floe size distribution
+      !
       REAL(wp) ::   ersw             ! enthalpy of water trapped into ridges
       REAL(wp) ::   zswitch, fvol    ! new ridge volume going to jl2
       REAL(wp) ::   z1_ai            ! 1 / a
@@ -695,6 +699,17 @@ CONTAINS
       !!-------------------------------------------------------------------
       !
       ll_shift(:,:) = .false.
+
+      IF( ln_fsd ) THEN
+         ALLOCATE( zaiAfsd(A2D(0),jpf,jpl) )
+         ALLOCATE( afsdrdg(A2D(0),jpf), afsdrft(A2D(0),jpf) )
+         ! a_ifsd is fraction of sea ice area, so define temporary variable = a_i * a_ifsd
+         DO jl = 1, jpl
+            DO_2D( 0, 0, 0, 0 )
+               IF( lice_pres(ji,jj) )   zaiAfsd(ji,jj,:,jl) = a_i(ji,jj,jl) * a_ifsd(ji,jj,:,jl)
+            END_2D
+         ENDDO
+      ENDIF
 
       zvti(:,:) = SUM( v_i(A2D(0),:), dim=3 )   ! total ice volume
       !
@@ -761,6 +776,11 @@ CONTAINS
                      ENDIF
                   ENDIF
 
+                  IF ( ln_fsd ) THEN
+                     afsdrdg(ji,jj,:) = zaiAfsd(ji,jj,:,jl1) * afrdg * phi_hrdg(ji,jj,jl1)
+                     afsdrft(ji,jj,:) = zaiAfsd(ji,jj,:,jl1) * afrft *  hi_hrft
+                  ENDIF
+
                   esrdg(ji,jj,:) = e_s(ji,jj,:,jl1) * afrdg
                   esrft(ji,jj,:) = e_s(ji,jj,:,jl1) * afrft
                   eirdg(ji,jj,:) = e_i(ji,jj,:,jl1) * afrdg + ersw * r1_nlay_i
@@ -814,6 +834,10 @@ CONTAINS
                      a_ip(ji,jj,jl1)  = a_ip(ji,jj,jl1) * ( 1._wp - afrdg - afrft )
                      v_ip(ji,jj,jl1)  = v_ip(ji,jj,jl1) * ( 1._wp - afrdg - afrft )
                      IF ( ln_pnd_lids ) v_il(ji,jj,jl1) = v_il(ji,jj,jl1) * ( 1._wp - afrdg - afrft )
+                  ENDIF
+                  !
+                  IF( ln_fsd ) THEN
+                     zaiAfsd(ji,jj,:,jl1) = zaiAfsd(ji,jj,:,jl1) * ( 1._wp - afrdg - afrft )
                   ENDIF
                   !
                   e_s(ji,jj,:,jl1) = e_s(ji,jj,:,jl1)   * ( 1._wp - afrdg - afrft )
@@ -924,6 +948,9 @@ CONTAINS
                         v_il (ji,jj,jl2) = v_il(ji,jj,jl2) + ( vlrdg(ji,jj) * rn_fpndrdg * fvol  + vlrft(ji,jj) * rn_fpndrft * zswitch )
                      ENDIF
                   ENDIF
+                  IF ( ln_fsd ) THEN
+                     zaiAfsd(ji,jj,:,jl2) = zaiAfsd(ji,jj,:,jl2) + ( afsdrdg(ji,jj,:) * farea + afsdrft(ji,jj,:) * zswitch )
+                  ENDIF
                   e_s(ji,jj,:,jl2) = e_s(ji,jj,:,jl2) + ( esrdg(ji,jj,:) * rn_fsnwrdg * fvol + esrft(ji,jj,:) * rn_fsnwrft * zswitch )
                   e_i(ji,jj,:,jl2) = e_i(ji,jj,:,jl2) + ( eirdg(ji,jj,:)              * fvol + eirft(ji,jj,:)              * zswitch )
                   IF( nn_icesal == 4 ) THEN
@@ -944,6 +971,26 @@ CONTAINS
       ! In case ridging/rafting lead to very small negative values (sometimes it happens)
       CALL ice_var_roundoff( a_i, v_i, v_s, sv_i, oa_i, a_ip, v_ip, v_il, e_s, e_i, szv_i, lice_pres )
 
+      IF( ln_fsd ) THEN
+         ! convert zaiAfsd back to a_ifsd and treat roundoff errors as in ice_var_roundoff:
+         DO jl = 1, jpl
+            DO_2D( 0, 0, 0, 0 )
+               IF( lice_pres(ji,jj) ) THEN
+# if defined key_single
+                  IF ( a_i(ji,jj,jl) >= epsi06 ) THEN
+# else
+                  IF ( a_i(ji,jj,jl) >= epsi20 ) THEN
+# endif
+                     a_ifsd(ji,jj,:,jl) = MAX( 0._wp, zaiAfsd(ji,jj,:,jl) / a_i(ji,jj,jl) )
+                  ELSE
+                     a_ifsd(ji,jj,:,jl) = 0._wp
+                  ENDIF
+                  CALL ice_fsd_cor( a_ifsd(ji,jj,:,jl) )   ! renormalise FSD
+               ENDIF
+            END_2D
+         ENDDO
+         DEALLOCATE( afsdrdg, afsdrft, zaiAfsd )
+      ENDIF
       !
    END SUBROUTINE rdgrft_shift
 

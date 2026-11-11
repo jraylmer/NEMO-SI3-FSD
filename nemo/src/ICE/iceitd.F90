@@ -19,6 +19,7 @@ MODULE iceitd
    USE par_ice        ! SI3 parameters
    USE phycst         ! physical constants
    USE ice            ! sea-ice: variables
+   USE icefsd  , ONLY : ice_fsd_cor
    USE icevar  , ONLY : ice_var_roundoff
    USE icectl         ! sea-ice: conservation tests
    !
@@ -375,6 +376,7 @@ CONTAINS
       REAL(wp) ::   zworka, zworkv, ztrans ! ice/snow transferred
       REAL(wp), DIMENSION(A2D(0))            ::   ztmp             ! workspace
       REAL(wp), DIMENSION(A2D(0),jpl)        ::   zaTsfn           !  -    -
+      REAL(wp), ALLOCATABLE, DIMENSION(:,:,:,:) :: zaiAfsd         !  -    -
       !!------------------------------------------------------------------
 
       !----------------------------------------------------------------------------------------------
@@ -385,6 +387,16 @@ CONTAINS
             IF( iptidx(ji,jj) ) zaTsfn(ji,jj,jl) = a_i(ji,jj,jl) * t_su(ji,jj,jl)
          END_2D
       END DO
+
+      ! similar for FSD, define variable equal to a_i*a_ifsd
+      IF( ln_fsd ) THEN
+         ALLOCATE( zaiAfsd(A2D(0),jpf,jpl) )
+         DO jl = 1, jpl
+            DO_2D( 0, 0, 0, 0 )
+               IF( iptidx(ji,jj) ) zaiAfsd(ji,jj,:,jl) = a_i(ji,jj,jl) * a_ifsd(ji,jj,:,jl)
+            END_2D
+         ENDDO
+      ENDIF
 
       !-------------------------------------------------------------------------------
       ! 2) Transfer volume and energy between categories
@@ -442,6 +454,14 @@ CONTAINS
                      ENDIF
                   ENDIF
                   !
+                  IF ( ln_fsd ) THEN                                    ! floe size distribution
+                     DO jk = 1, jpf
+                        ztrans                = zaiAfsd(ji,jj,jk,jl1) * zworka
+                        zaiAfsd(ji,jj,jk,jl1) = zaiAfsd(ji,jj,jk,jl1) - ztrans
+                        zaiAfsd(ji,jj,jk,jl2) = zaiAfsd(ji,jj,jk,jl2) + ztrans
+                     ENDDO
+                  ENDIF
+                  !
                   DO jk = 1, nlay_s                                     ! Snow heat content
                      ztrans            = e_s(ji,jj,jk,jl1) * zworkv
                      e_s(ji,jj,jk,jl1) = e_s(ji,jj,jk,jl1) - ztrans
@@ -476,9 +496,9 @@ CONTAINS
       !-------------------
       ! clem: The transfer between one category to another can lead to very small negative values (-1.e-20)
       !       because of truncation error ( i.e. 1. - 1. /= 0 )
-
+      ! jake: FSD treated after (4) as zaiAfsd needs to be converted back to a_ifsd
       CALL ice_var_roundoff( a_i, v_i, v_s, sv_i, oa_i, a_ip, v_ip, v_il, e_s, e_i, szv_i, iptidx )
-      
+
       ! at_i must be <= rn_amax
       DO_2D( 0, 0, 0, 0 )
          IF( iptidx(ji,jj) ) THEN
@@ -514,6 +534,26 @@ CONTAINS
          END_2D
       END DO
       !
+      IF( ln_fsd ) THEN
+         ! convert zaiAfsd back to a_ifsd and treat roundoff errors as in ice_var_roundoff [completing (3) above]:
+         DO jl = 1, jpl
+            DO_2D( 0, 0, 0, 0 )
+               IF( iptidx(ji,jj) ) THEN
+# if defined key_single
+                  IF ( a_i(ji,jj,jl) >= epsi06 ) THEN
+# else
+                  IF ( a_i(ji,jj,jl) >= epsi20 ) THEN
+# endif
+                     a_ifsd(ji,jj,:,jl) = MAX( 0._wp, zaiAfsd(ji,jj,:,jl) / a_i(ji,jj,jl) )
+                  ELSE
+                     a_ifsd(ji,jj,:,jl) = 0._wp
+                  ENDIF
+                  CALL ice_fsd_cor( a_ifsd(ji,jj,:,jl) )   ! renormalise FSD
+               ENDIF
+            END_2D
+         ENDDO
+         DEALLOCATE( zaiAfsd )
+      ENDIF
       !
    END SUBROUTINE itd_shiftice
 

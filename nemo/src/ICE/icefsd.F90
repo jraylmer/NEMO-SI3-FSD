@@ -351,6 +351,7 @@ CONTAINS
       REAL(wp)                            ::   zlogfsd_grad      ! forward-in-space gradient of FSD in log-log space
       REAL(wp)                            ::   zfsd_res          ! correction term for area conservation
       REAL(wp)                            ::   zt_elapsed        ! time elapsed during adaptive time stepping (units: s)
+      LOGICAL                             ::   llfrac            ! whether category can undergo brittle fracture or not
       INTEGER                             ::   isubt             ! number of iterations used in adaptive time stepping
       INTEGER                             ::   ji, jj, jl, jf    ! dummy loop indices
       !
@@ -360,7 +361,7 @@ CONTAINS
 
       DO jl = 1, jpl
          DO_2D( 0, 0, 0, 0 )
-            IF( (a_i(ji,jj,jl) > epsi10) .AND. (ALL(a_ifsd(ji,jj,:,jl) > epsi10)) ) THEN
+            IF( a_i(ji,jj,jl) > epsi10 ) THEN
 
                ! Start adaptive time stepping:
                zt_elapsed = 0._wp   ! time elapsed during adaptive time stepping
@@ -372,19 +373,31 @@ CONTAINS
                   zgain(:) = 0._wp
 
                   DO jf = 2, jpf
-                     ! Backward-in-(log)-space gradient (note a_ifsd <--> L*ds
-                     ! and denominator pre-computed in fsd_initbounds):
-                     zlogfsd_grad = (   LOG( a_ifsd(ji,jj,jf  ,jl) / floe_ds(jf  ) )   &
-                        &             - LOG( a_ifsd(ji,jj,jf-1,jl) / floe_ds(jf-1) ) ) / floe_dlog_sc(jf)
-                     !
-                     ! If gradient is too large here, restore toward maximum allowed gradient by
-                     ! transferring area fraction to the smaller category as exponential decay
-                     !
-                     ! Offset of 2 is to transform from area-density FSD (a_ifsd)
-                     !                             to number-density FSD (gradient rn_fsd_brit_grad)
-                     IF ( zlogfsd_grad > rn_fsd_brit_grad + 2._wp ) THEN
-                        zloss(jf)   = zloss(jf)   + a_ifsd(ji,jj,jf,jl)   ! divide by timescale after
-                        zgain(jf-1) = zgain(jf-1) + a_ifsd(ji,jj,jf,jl)
+                     IF( a_ifsd(ji,jj,jf,jl) > epsi10 ) THEN   ! otherwise, skip jf (no ice to fracture)
+                        !
+                        ! === Determine whether to fracture === !
+                        IF( a_ifsd(ji,jj,jf-1,jl) > epsi10 ) THEN
+                           !
+                           ! Ice in smaller category => compute backward-in-(log)-space gradient
+                           ! (note a_ifsd <--> L*ds and denominator pre-computed in fsd_initbounds):
+                           zlogfsd_grad = (   LOG( a_ifsd(ji,jj,jf  ,jl) / floe_ds(jf  ) )   &
+                              &             - LOG( a_ifsd(ji,jj,jf-1,jl) / floe_ds(jf-1) ) ) / floe_dlog_sc(jf)
+                           !
+                           ! Check if this gradient is too large
+                           ! offset of 2 is to transform from area-density FSD (a_ifsd)
+                           !                             to number-density FSD (gradient rn_fsd_brit_grad)
+                           llfrac = (zlogfsd_grad > rn_fsd_brit_grad + 2._wp)
+                        ELSE
+                           ! No ice in smaller category => infinite gradient
+                           llfrac = .TRUE.
+                        ENDIF
+                        !
+                        ! Update loss/gain terms if brittle fracture from category jf -> jf-1:
+                        IF( llfrac ) THEN
+                           zloss(jf)   = zloss(jf)   + a_ifsd(ji,jj,jf,jl)   ! divide by timescale after
+                           zgain(jf-1) = zgain(jf-1) + a_ifsd(ji,jj,jf,jl)
+                        ENDIF
+                        !
                      ENDIF
                   ENDDO
 

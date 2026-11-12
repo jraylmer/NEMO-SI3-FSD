@@ -86,10 +86,10 @@ MODULE sbc_oce
    LOGICAL , PUBLIC                 ::   ln_wave_spec     !: =T to read full wave spectrum
    INTEGER , PUBLIC                 ::   nn_nwfreq        !: number of spectral (frequency) components (discretised bins)
    LOGICAL , PUBLIC                 ::   ln_wfreq_usr     !: =T if frequency bin bounds are defined by rn_wfreq_usr
-   REAL    , PUBLIC, DIMENSION(100) ::   rn_wfreq_usr     !: user-defined frequency bin bounds; up to 100 (arbitrary limit) can be specified
+   REAL(wp), PUBLIC, DIMENSION(100) ::   rn_wfreq_usr     !: user-defined frequency bin bounds; up to 100 (arbitrary limit) can be specified
    LOGICAL , PUBLIC                 ::   ln_wfreq_usr_exp !: user-defined frequency bin bounds are exponentially spaced
-   REAL    , PUBLIC                 ::   rn_wfreq_0       !: lowest frequency (when calculated internally, ln_wfreq_usr=F)
-   REAL    , PUBLIC                 ::   rn_wfreq_k       !: ratio between adjacent frequencies (when calculated internally, ln_wfreq_usr=F)
+   REAL(wp), PUBLIC                 ::   rn_wfreq_0       !: lowest frequency (when calculated internally, ln_wfreq_usr=F)
+   REAL(wp), PUBLIC                 ::   rn_wfreq_k       !: ratio between adjacent frequencies (when calculated internally, ln_wfreq_usr=F)
    !
    !!----------------------------------------------------------------------
    !!           switch definition (improve readability)

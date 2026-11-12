@@ -26,7 +26,7 @@ MODULE icethd_do
    USE icethd_sal     ! sea-ice: salinity profiles
    USE icefsd  , ONLY : ice_fsd_part_newice, ice_fsd_add_newice, ice_fsd_thd, ice_fsd_weld, ice_fsd_dia
    USE icefsd  , ONLY : nf_newice
-   USE icewav  , ONLY : ice_wav_newice
+   USE icewav  , ONLY : jpfrac_z16, ice_wav_newice
    USE in_out_manager ! I/O manager
    USE lib_mpp        ! MPP library
    USE timing         ! Timing
@@ -330,11 +330,14 @@ CONTAINS
                !
                IF( ln_fsd ) THEN
                   !
-                  ! Floe size category that new ice is added to, jcat_fsd, can be modified by
-                  ! ocean waves if ln_ice_wav=T, else it is set in FSD module (nf_newice):
+                  ! Floe size category that new ice is added to, jcat_fsd, can be modified by ocean
+                  ! waves if ln_ice_wav=T (and not Z16 scheme), else it is set in FSD module (nf_newice):
                   !
-                  jcat_fsd = nf_newice
-                  IF( ln_ice_wav ) CALL ice_wav_newice( hsw(ji,jj), wpf(ji,jj), jcat_fsd )
+                  IF( ln_ice_wav .AND. (nn_frac_scheme /= jpfrac_z16) ) THEN
+                     CALL ice_wav_newice( hsw(ji,jj), wpf(ji,jj), jcat_fsd )
+                  ELSE
+                     jcat_fsd = nf_newice
+                  ENDIF
                   !
                   CALL ice_fsd_add_newice( a_ifsd(ji,jj,:,jcat)         , za_newice,   &
                      &                     za_b(jcat) + zda_latgro(jcat), jcat_fsd     )

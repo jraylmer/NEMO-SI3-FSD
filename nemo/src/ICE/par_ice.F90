@@ -122,6 +122,7 @@ MODULE par_ice
    LOGICAL , PUBLIC ::   ln_ice_wav       !: Activate wave ice interactions (T) or not (F)
    LOGICAL , PUBLIC ::   ln_ice_wav_attn  !: Activate wave-in-ice attenuation scheme (Roach et al. 2018)
    LOGICAL , PUBLIC ::   ln_ice_wav_spec  !: Read full wave spectrum from model/forcing
+   INTEGER , PUBLIC ::   nn_frac_scheme   !: Choice of wave-ice fracture scheme
 
    !!----------------------------------------------------------------------
    !!                   shared other parameters

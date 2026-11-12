@@ -76,10 +76,10 @@ MODULE icewav
    REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:,:) ::   wgtB_y24b   ! weight factor (Y24b scheme; B term)
    REAL(wp), ALLOCATABLE, SAVE, DIMENSION(:,:) ::   stmer       ! meridional distance across T cells (m)
 
-   INTEGER , PARAMETER ::   jpfrac_z16  = 1         ! option for nn_frac_scheme -> Zhang et al. (2016) scheme
-   INTEGER , PARAMETER ::   jpfrac_y24a = 2         ! option for nn_frac_scheme -> Yang et al. (2024) scheme A
-   INTEGER , PARAMETER ::   jpfrac_y24b = 3         ! option for nn_frac_scheme -> Yang et al. (2024) scheme B
-   INTEGER , PARAMETER ::   jpfrac_ht15 = 4         ! option for nn_frac_scheme -> Horvat and Tziperman (2015) scheme
+   INTEGER , PARAMETER, PUBLIC ::   jpfrac_z16  = 1             ! option for nn_frac_scheme -> Zhang et al. (2016) scheme
+   INTEGER , PARAMETER         ::   jpfrac_y24a = 2             ! option for nn_frac_scheme -> Yang et al. (2024) scheme A
+   INTEGER , PARAMETER         ::   jpfrac_y24b = 3             ! option for nn_frac_scheme -> Yang et al. (2024) scheme B
+   INTEGER , PARAMETER         ::   jpfrac_ht15 = 4             ! option for nn_frac_scheme -> Horvat and Tziperman (2015) scheme
 
    LOGICAL ::   l_attn_calc_spec   ! whether spectrum needs to be calculated in subroutine ice_wav_attn
    LOGICAL ::   l_frac_calc_spec   ! whether spectrum needs to be calculated in subroutine ice_wav_frac
@@ -105,7 +105,6 @@ MODULE icewav
    REAL(wp)        ::   rn_attn_ct2       !:    factor of T^2
    REAL(wp)        ::   rn_attn_cht       !:    factor of h*T
    REAL(wp)        ::   rn_attn_tun       !: Overall tuning factor on a(h,T) [NOT logarithm of a]
-   INTEGER         ::   nn_frac_scheme    !: Selection of wave-ice fracture scheme
    REAL(wp)        ::   rn_ice_wav_ecri   !: Critical strain at which ice fractures due to waves (dimensionless)
    LOGICAL         ::   ln_z16_const      !: Use constant participation factor (--> recover Zhang et al. 20*15* scheme)
    REAL(wp)        ::   rn_z16_cb         !: Constant participation factor if ln_z16_const
@@ -202,22 +201,21 @@ CONTAINS
       !! ** Purpose :   Calculate floe size (category) of new ice grown in
       !!                open water dependent on local wave conditions
       !!
-      !! ** Method  :   Maximum floe diameter is determined from:
+      !! ** Method  :   Maximum floe diameter is determined from Shen et al. (2001):
       !!
       !!                   s_max = sqrt[ (2*C2*Lp^2) / (Wa*g*rhoi*pi^3) ]
       !!
       !!                where:
       !!
-      !!                   C2   : tensile stress mode parameter (kg.m-1.s-2)
+      !!                   C2   : bonding strength parameter (kg.m-1.s-2)
       !!                   Lp   : wavelength of peak wave energy density (m)
       !!                   Wa   : wave amplitude (m)
       !!                   g    : acceleration due to gravity (m.s-2)
       !!                   rhoi : density of sea ice (kg.m-3)
       !!
-      !!                Following Roach et al. (2019), Wa is taken to be half
-      !!                of the local significant wave height Hs, Lp is computed
-      !!                from the local peak frequency fp using the dispersion
-      !!                relation for deep water surface gravity waves:
+      !!                Following Roach et al. (2019), Wa is taken to be half of the local
+      !!                significant wave height Hs, Lp is computed from the local peak frequency fp
+      !!                using the dispersion relation for deep water surface gravity waves:
       !!
       !!                   Lp = g / (2*pi*fp^2),
       !!
@@ -229,40 +227,40 @@ CONTAINS
       !!                pwpf : local wave frequency of peak energy (Hz)
       !!
       !! ** Outputs :   kcat : integer index of floe size distribution category
-      !!                       to which new ice formation is added
+      !!                       to which new ice should be added
       !!
       !! ** Callers :   ice_thd_do -> [ice_wav_newice]
       !!
-      !! ** Note    :   if fracture scheme is Z16, which does not use wave data, the calculation
-      !!                is bypassed and instead returns the default new floe size category
-      !!
       !! ** References
       !!    ----------
+      !!    Shen, H. H., Ackley, S. F., & Hopkins, M. A. (2001).
+      !!              A conceptual model of pancake-ice formation in a wave field.
+      !!              Annals of Glaciology, 33(2), 361-367.
+      !!    Roach, L. A., Smith, M. M., & Dean, S. M. (2018).
+      !!              Quantifying the growth of pancake sea ice floes using images from drifting buoys.
+      !!              Journal of Geophysical Research: Oceans, 123(4), 2851-2866.
       !!    Roach, L. A., Bitz, C. M., Horvat, C., & Dean, S. M. (2019).
       !!              Advances in modeling interactions between sea ice and ocean surface waves.
       !!              Journal of Advances in Modeling Earth Systems, 11, 4167-4181.
-      !!
       !!-------------------------------------------------------------------
+      REAL(wp), INTENT(in)    ::   phsw            ! local significant wave height (m)
+      REAL(wp), INTENT(in)    ::   pwpf            ! local wave peak frequency (Hz)
+      INTEGER , INTENT(inout) ::   kcat            ! FSD category index for new ice growth
       !
-      REAL(wp), INTENT(in)    ::   phsw   ! local significant wave height (m)
-      REAL(wp), INTENT(in)    ::   pwpf   ! local wave peak frequency (Hz)
-      INTEGER , INTENT(inout) ::   kcat   ! FSD category index for new ice growth
-      !
-      REAL(wp), PARAMETER ::   zC2 = .167_wp   ! tensile mode stress parameter (kg.m-1.s-2)
-      REAL(wp)            ::   zsmax           ! maximum new ice floe size (m)
-      INTEGER             ::   jf              ! dummy loop index
-      !
+      REAL(wp), PARAMETER     ::   zC2 = .167_wp   ! bonding strength parameter from Roach et al. 2018 (kg.m-1.s-2)
+      REAL(wp)                ::   zsmax           ! maximum new ice floe size (m)
+      INTEGER                 ::   jf              ! dummy loop index
       !!-------------------------------------------------------------------
 
       ! Do not need as strict condition on hsw or wpf as in global module variables minhsw, minwpf
       ! (just need to make sure we avoid division by zero):
-      IF( (nn_frac_scheme == jpfrac_z16) .OR. (phsw < epsi06) .OR. (pwpf < epsi06) ) THEN
+      IF( (phsw < epsi06) .OR. (pwpf < epsi06) ) THEN
          !
          kcat = nf_newice   ! no waves present => set to default new floe size category
          !
       ELSE
          !
-         ! --- Calculate maximum floe size from wave conditions, r_max:
+         ! --- Calculate maximum floe size from wave conditions:
          zsmax = SQRT( zC2 * grav / (rpi * rhoi * phsw) ) / (rpi**2 * pwpf**2)
          !
          ! --- Find FSD category that r_max belongs to:
@@ -373,7 +371,7 @@ CONTAINS
       INTEGER , INTENT(in)               ::   kt            ! ocean time step
       !
       REAL(wp), DIMENSION(nn_nwfreq)     ::   zattxp        ! local damping exponent (number of floes x attenuation coefficient)
-      REAL(wp)                           ::   zdmean        ! grid cell mean floe diameter (m)
+      REAL(wp)                           ::   zsavgi        ! grid cell mean floe diameter (m)
       REAL(wp)                           ::   znfloes       ! number of floes
       REAL(wp)                           ::   zhi           ! mean ice thickness (m)
       REAL(wp)                           ::   zloga         ! natural logarithm of attenuation coefficient
@@ -413,18 +411,19 @@ CONTAINS
          !
          IF( at_i(ji,jj) > epsi06 ) THEN
 
-            ! Mean floe diameter:
-            zdmean = 0._wp
+            ! Mean floe diameter (over sea ice, not grid cell mean):
+            zsavgi = 0._wp
             DO jf = 1, jpf
                DO jl = 1, jpl
-                  zdmean = zdmean + floe_sc(jf) * a_i(ji,jj,jl) * a_ifsd(ji,jj,jf,jl)
+                  zsavgi = zsavgi + floe_sc(jf) * a_i(ji,jj,jl) * a_ifsd(ji,jj,jf,jl)
                ENDDO
             ENDDO
+            zsavgi = zsavgi / at_i(ji,jj)   ! mean over grid cell -> mean over sea ice
 
-            ! Number of floes per unit distance encountered ~ sea ice conc. / zdmean
+            ! Number of floes per unit distance encountered ~ sea ice conc. / zsavgi
             ! => number of floes encountered by waves travelling meridionally across grid cell:
-            IF( zdmean > 0._wp ) THEN
-               znfloes = stmer(ji,jj) * at_i(ji,jj) / zdmean   ! stmer(ji,jj) = meridional distance across T cells
+            IF( zsavgi > 0._wp ) THEN
+               znfloes = stmer(ji,jj) * at_i(ji,jj) / zsavgi   ! stmer(ji,jj) = meridional distance across T cells
             ELSE
                znfloes = 0._wp
             ENDIF
@@ -1352,8 +1351,7 @@ CONTAINS
             ! Weight factor wgtB_y24b(jw,j2) is the fraction of spectral class jw width for which the
             ! fracture size (s = L/2) is contained within the transferred floe size category j2:
             DO j2 = 1, jpf
-                pBfrac(j1,j2) = pBfrac(j1,j2) +   wgtQ_y24b(jw,j1) * zprob(jw)     &
-                   &                            * wgtB_y24b(jw,j2) * floe_ds(j2)
+                pBfrac(j1,j2) = pBfrac(j1,j2) + wgtQ_y24b(jw,j1) * zprob(jw) * wgtB_y24b(jw,j2)
             ENDDO
          ENDDO
          !
@@ -1953,8 +1951,8 @@ CONTAINS
          &             nn_ht15_nx1d   , rn_ht15_dx1d   , nn_ht15_rmin   , ln_ht15_rand  ,   &
          &             rn_ht15_tol    , nn_ht15_maxiter, ln_ht15_warn   ,                   &
          &             ln_ice_wav_attn, rn_attn_lam_tol, rn_attn_c0     , rn_attn_ch    ,   &
-         &             rn_attn_ch     , rn_attn_ct     , rn_attn_ch2    , rn_attn_ct2   ,   &
-         &             rn_attn_cht    , rn_attn_tun
+         &             rn_attn_ct     , rn_attn_ch2    , rn_attn_ct2    , rn_attn_cht   ,   &
+         &             rn_attn_tun
       !!-------------------------------------------------------------------
       !
       READ_NML_REF(numnam_ice, namwav)
@@ -2200,6 +2198,7 @@ CONTAINS
          l_attn_calc_spec = .FALSE.
          ln_ice_wav_spec  = .FALSE.
          ln_ice_wav_attn  = .FALSE.
+         nn_frac_scheme   = 0         ! ice_thd_do checks this /= jpfrac_z16 before calling ice_wav_newice
       ENDIF
 
    END SUBROUTINE ice_wav_init

@@ -123,8 +123,12 @@ CONTAINS
       !
       CALL ice_thd_frazil             !--- frazil ice: collection thickness (ht_i_new) & fraction of frazil (fraz_frac)
       !
-      ! Save a_ifsd before lateral melt (ice_thd_da; only thing affecting this variable in jl loop below):
-      IF( ln_fsd )   za_ifsdb_da(A2D(0),:,:) = a_ifsd(A2D(0),:,:)
+      ! Save a_ifsd before lateral melt (ice_thd_da; only thing affecting this variable in jl loop below)
+      ! Also a_i    before lateral melt (it is set again in loop, but some jl may not change so needs initialising)
+      IF( ln_fsd ) THEN
+         za_ifsdb_da(A2D(0),:,:) = a_ifsd(A2D(0),:,:)  ! initialise
+         za_ib_da   (A2D(0),:)   = a_i   (A2D(0),:)
+      ENDIF
       !
       DO jl = 1, jpl
 

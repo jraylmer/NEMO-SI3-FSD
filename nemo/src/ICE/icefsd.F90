@@ -488,7 +488,7 @@ CONTAINS
       !!                rate, G_s (needed to update FSD), which are given by (see external docs):
       !!
       !!                   G_s          = pi * v_latgro / (2 * a_shape * Slateral * dt)
-      !!                   da_latgro(h) = v_latgro * g(h) * rho(h) / (2 * Slateral)
+      !!                   da_latgro(h) = v_latgro * g(h) * rho(h) / Slateral
       !!
       !!                where dt is the time step, rho(h) is perimeter density diagnostic, and the
       !!                second equation refers to each ice thickness category. These updates are not
@@ -931,7 +931,7 @@ CONTAINS
             zgain(:)     = 0._wp
             ztendency(:) = 0._wp
 
-            ! Consider all category interaction pairs (jf1,jf2) and accummulate loss/gain terms:
+            ! Consider all category interaction pairs (j1,j2) and accummulate loss/gain terms:
             !
             DO j1 = 1, jpf                 ! loop over all floe size categories
                DO j2 = j1, jpf             ! avoid double counting
@@ -1351,7 +1351,7 @@ CONTAINS
 
       ! Sometimes automatic category spacing is too small, particularly in exponential case
       ! Check for small category widths and warn with suggested changes in each case:
-      IF( ANY( ABS(floe_sl(:)) < 1.e-2 ) ) THEN
+      IF( ANY( ABS(floe_ds(:)) < 1.e-2 ) ) THEN
          CALL ctl_warn('fsd_init_bounds: some FSD categories are very small, < 1cm width; consider:'   ,   &
                &       '                 nn_fsd_catini = 0  : making categories wider'                 ,   &
                &       '                 nn_fsd_catini = 1-2: (in/de)creasing rn_fsd_smin/rn_fsd_smax)',   &
@@ -1412,19 +1412,15 @@ CONTAINS
       !! ** Purpose :   Set initial values of floe size distribution
       !!
       !! ** Method  :   Set values based on namelist (namfsd) nn_fsd_ini:
-      !!                   0 = no initialisation (i.e., all FSD values = 0)
       !!                   1 = all ice in largest floe size category
-      !!                   2 = set all grid points, all ice thickness categories
-      !!                       to have an imposed power law distribution. In this
-      !!                       case the number density distribution exponent can
-      !!                       be changed via namelist (namfsd) rn_fsd_ini_alpha
-      !!                       (default = 2.1 as in Perovich and Jones, 2014).
+      !!                   2 = set all grid points, all ice thickness categories to have an
+      !!                       imposed power law distribution. In this case the number
+      !!                       density distribution exponent can be changed via namelist
+      !!                       rn_fsd_ini_alpha (default = 2.1 as in Perovich and Jones, 2014).
       !!
-      !! ** Note    :   Default nn_fsd_ini = 2. If general ice initialisation
-      !!                flag, ln_iceini, is set to false, then nn_fsd_ini is
-      !!                treated as in case 0 regardless of namelist value, i.e.,
-      !!                no initialisation of the FSD is done. This allows the
-      !!                FSD to 'emerge' from physical processes.
+      !! ** Note    :   Default nn_fsd_ini = 2. If general ice initialisation flag, ln_iceini,
+      !!                is set to false, then no initialisation of the FSD is done.
+      !!                This allows the FSD to 'emerge' from physical processes.
       !!
       !! ** References
       !!    ----------
@@ -1480,7 +1476,7 @@ CONTAINS
             !
             a_ifsd(:,:,jpf,:) = 1._wp
             !
-         ELSE  ! >= 2
+         ELSEIF( nn_fsd_ini == 2 ) THEN
             IF(lwp) WRITE(numout,*) '   ice_fsd_istate   ==>>   imposed power law for initial FSD everywhere'
             !
             ztotfrac = 0._wp
@@ -1502,6 +1498,8 @@ CONTAINS
                a_ifsd(:,:,:,jl) = a_ifsd(:,:,:,1)
             ENDDO
             !
+         ELSE
+            CALL ctl_stop( 'ice_fsd_istate ===>>> choose nn_fsd_ini = 1 or 2' )
          ENDIF
       ELSE
          IF(lwp) WRITE(numout,*) '   ice_fsd_istate   ==>>   initial FSD = 0 (no initialisation)'

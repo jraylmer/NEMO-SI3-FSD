@@ -261,6 +261,7 @@ CONTAINS
       INTEGER                 , INTENT(inout) ::   ksubt        ! number of adaptive time steps used
       !
       CHARACTER(len=3)                        ::   cl_warn      ! for warning print
+      CHARACTER(len=90)                       ::   cl_stop      ! for crash   print
       REAL(wp), DIMENSION(jpf)                ::   zdt_restr    ! time step restrictions (units: s)
       REAL(wp)                                ::   zt_remain    ! remaining time to evolve (units: s)
       REAL(wp)                                ::   zdt          ! largest allowed time step (units: s)
@@ -290,9 +291,16 @@ CONTAINS
       zdt = MIN(zt_remain, MINVAL(zdt_restr))
 
       IF( (zdt / zt_remain ) < epsi10 ) THEN   ! stop if adaptive time step is too small
-         CALL ctl_stop('STOP', '',                                                             &
-            &  '   FSD tendency has become unstable during subroutine: '//TRIM(cdcrn),         &
-            &  '   (suggestion: reducing width of floe size categories may overcome the issue)')
+         !
+         ! Include some info about which category is causing the crash:
+         jf = MINLOC( zdt_restr(:), DIM=1 )
+         WRITE(cl_stop,'(A,I3,A,E10.4,A,E10.4)')   &
+            &   '   in floe size category ', jf, ', a_ifsd = ', pa_ifsd(jf), ', tendency (1/s) = ', ptendency(jf)
+         !
+         CALL ctl_stop('STOP', '',                                                               &
+            &  '   FSD tendency has become unstable during subroutine: '//TRIM(cdcrn),           &
+            &  '   (suggestion: reducing width of floe size categories may overcome the issue)', &
+            &  '', cl_stop)
       ENDIF
 
       ! Update FSTD, time elapsed, and number of iterations:

@@ -258,7 +258,7 @@ def main():
 
         print("\n" + ("-"*44))
         print(  f"Category limits computed for n = {n}\ns_min = {100.*smin:.1f} cm, "
-              + f"r_max = {smax/1000.:.3f} km, sigma = {cmd.sigma:.2f}")
+              + f"s_max = {smax/1000.:.3f} km, sigma = {cmd.sigma:.2f}")
         print(("="*44) + "\n")
         print(tabulate(rows, headers=headers) + "\n" + ("-")*44)
 

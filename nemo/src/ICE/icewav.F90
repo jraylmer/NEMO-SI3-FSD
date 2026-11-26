@@ -878,8 +878,6 @@ CONTAINS
                               &               - zQfrac(jf) * a_ifsd(ji,jj,jf,jl)
                         ENDDO
                         !
-                        WHERE( ABS(za_ifsd_tend) < epsi10 ) za_ifsd_tend = 0._wp
-                        !
                         ! Evolve a_ifsd over maximum stable time step and increase zt_elapsed accordingly:
                         CALL ice_fsd_tstep('ice_wav_frac', a_ifsd(ji,jj,:,jl), za_ifsd_tend(:), zt_elapsed, isubt)
                         !
